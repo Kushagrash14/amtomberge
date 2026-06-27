@@ -1,0 +1,9 @@
+MONGO_URI=mongodb+srv://<mongodb_user>:<mongodb_password>@<cluster-name>.mongodb.net/atomberg?retryWrites=true&w=majority
+FRONTEND_URL=https://<your-vercel-project>.vercel.app
+JWT_SECRET=<paste-a-long-random-secret-here>
+ADMIN_PASSWORD=<admin-panel-password>
+EMAIL_USER=<your-smtp-email>
+EMAIL_PASS=<your-smtp-app-password>
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_SECURE=false
