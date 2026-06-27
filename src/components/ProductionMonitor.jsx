@@ -17,7 +17,18 @@ const apiFetch = async (method, path, body) => {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API_BASE}/production${path}`, opts);
-  return res.json();
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { success:false, message:`Server returned ${res.status} ${res.statusText}` };
+  }
+  if (!res.ok && data.success !== false) {
+    data.success = false;
+    data.message = data.message || `Server returned ${res.status} ${res.statusText}`;
+  }
+  return data;
 };
 
 // ─── callServer — maps legacy Apps Script action names → REST endpoints ───────
@@ -1472,9 +1483,9 @@ function ProductionMonitor({ session, onLogout }) {
           const tabs = [
             { id:"dashboard", label:"📊 Dashboard", show:true },
             { id:"scanning",  label:"🔍 Scanning",  show:true },
-            { id:"reports",   label:"📋 Reports",   show:isAdmin },
-            { id:"charts",    label:"📈 Charts",    show:isAdmin },
-            { id:"settings",  label:"⚙️ Settings",  show:isAdmin },
+            { id:"reports",   label:"📋 Reports",   show:true },
+            { id:"charts",    label:"📈 Charts",    show:true },
+            { id:"settings",  label:"⚙️ Settings",  show:true },
           ];
           return (
             <div className="pg-tabs">
@@ -1483,9 +1494,9 @@ function ProductionMonitor({ session, onLogout }) {
                   {t.label}
                 </button>
               ))}
-              {(adminUnlocked || isAdmin) && (
-                <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
-              )}
+             {adminUnlocked && (
+           <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
+          )}
             </div>
           );
         })()}
@@ -1521,7 +1532,7 @@ function ProductionMonitor({ session, onLogout }) {
             addModel={addModel} delModel={delModel}
           />
         )}
-        {activeTab==="admin" && (adminUnlocked || session?.role==="admin" || session?.role==="superadmin") && (
+        {activeTab==="admin" && adminUnlocked && (
           <AdminTab
             S={S} targets={targets} setTargets={setTargets}
             idleThrInput={idleThrInput} setIdleThrInput={setIdleThrInput}
