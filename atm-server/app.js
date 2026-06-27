@@ -8,6 +8,11 @@ import apiRouter from './routes/api.route.js';
 import connectDB from './db/config/mongoose.config.js';
 import insertUser from './middleware/insertUser.js';
 
+// Add this import
+import productionRouter from './routes/production.route.js';
+
+
+
 dotenv.config();
 
 const app = express();
@@ -84,7 +89,7 @@ app.use(async (req, res, next) => {
   if (skipDbPaths.has(req.path)) return next();
   try {
     await connectDB();
-    await insertUser();
+    // await insertUser();
     next();
   } catch (error) {
     console.error('Database middleware error:', error?.message || error);
@@ -95,11 +100,11 @@ app.use(async (req, res, next) => {
 mountApi('', indexRouter);
 mountApi('/auth', authRouter);
 mountApi('', apiRouter);
+// Add this mount (alongside your existing routes)
+app.use('/api/production', productionRouter);
 
 export const startServer = async () => {
-  await connectDB();
-  await insertUser();
-
+  
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

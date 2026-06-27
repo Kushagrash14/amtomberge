@@ -118,4 +118,8 @@ router.post("/register", async (req, res) => {
     }
 
 })
+
+router.post("/logout", (req, res) => {
+    return res.status(200).json({ message: "Logged out successfully", success: true });
+});
 export default router;

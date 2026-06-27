@@ -8,6 +8,8 @@ import authRouter from '../routes/auth.route.js';
 import apiRouter from '../routes/api.route.js';
 import connectDB from '../db/config/mongoose.config.js';
 import insertUser from '../middleware/insertUser.js';
+import productionRouter from '../routes/production.route.js';
+
 
 dotenv.config();
 
@@ -87,6 +89,7 @@ app.use(async (req, res, next) => {
 app.use('/api', indexRouter);
 app.use('/api/auth', authRouter);
 app.use('/api', apiRouter);
+app.use('/api/production', productionRouter);
 
 // ── Export for Vercel (no app.listen) ─────────────────────────────────────────
 export default app;

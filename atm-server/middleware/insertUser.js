@@ -6,7 +6,7 @@ const insertUser = async () => {
   if (seeded) return;
 
   try {
-    const email = "pradeeprajput898989@gmail.com"; // Replace with the email you want to check
+    const email = "software.2040@pgel.in"; // Replace with the email you want to check
 
     const existingUser = await userModel.findOne({ email });
     if (existingUser) {
@@ -16,7 +16,7 @@ const insertUser = async () => {
     }
 
     const newUser = new userModel({
-      username: "pradeep",
+      username: "itspradeep",
       name: "pradeep",
       email: email,
       role: "superadmin",
