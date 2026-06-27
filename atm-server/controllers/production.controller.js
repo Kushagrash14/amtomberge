@@ -86,7 +86,9 @@ export const addSerial = async (req, res) => {
     await ProductionEntry.create({ date, serial, model, timestamp });
     ok(res, { message: 'Serial saved' });
   } catch (e) {
-    if (e.code === 11000) return res.json({ success: false, message: 'Duplicate serial', code: 'DUPLICATE' });
+    if (e.code === 11000 || e.code === 'ER_DUP_ENTRY') {
+      return res.json({ success: false, message: 'Duplicate serial', code: 'DUPLICATE' });
+    }
     err(res, 'Failed to save serial', 500);
   }
 };

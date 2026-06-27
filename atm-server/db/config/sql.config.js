@@ -1,20 +1,45 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 let pool;
 let schemaReady;
 
 const getDatabaseUrl = () => process.env.DATABASE_URL || process.env.MYSQL_URL || process.env.SQL_URL || '';
 
+const sanitizeMysqlUri = (rawUrl) => {
+  const parsed = new URL(rawUrl);
+  parsed.searchParams.delete('ssl-mode');
+  parsed.searchParams.delete('ssl_mode');
+  return parsed.toString();
+};
+
+const readCaCertificate = () => {
+  if (process.env.SQL_CA_CERT) return process.env.SQL_CA_CERT.replace(/\\n/g, '\n');
+
+  const configuredPath = process.env.SQL_CA_CERT_PATH;
+  if (configuredPath && fs.existsSync(configuredPath)) {
+    return fs.readFileSync(configuredPath, 'utf8');
+  }
+
+  const bundledPath = fileURLToPath(new URL('./aiven-ca.pem', import.meta.url));
+  if (fs.existsSync(bundledPath)) {
+    return fs.readFileSync(bundledPath, 'utf8');
+  }
+
+  return undefined;
+};
+
 const createPool = () => {
   const url = getDatabaseUrl().trim();
   if (!url) throw new Error('DATABASE_URL_MISSING');
 
-  const sslRequired = /ssl(mode)?=required/i.test(url) || process.env.MYSQL_SSL === 'true';
-  const ca = process.env.SQL_CA_CERT
-    || (process.env.SQL_CA_CERT_PATH ? fs.readFileSync(process.env.SQL_CA_CERT_PATH, 'utf8') : undefined);
+  const sslRequired = /ssl[-_]?mode=required/i.test(url)
+    || /ssl=required/i.test(url)
+    || process.env.MYSQL_SSL === 'true';
+  const ca = readCaCertificate();
   return mysql.createPool({
-    uri: url,
+    uri: sanitizeMysqlUri(url),
     waitForConnections: true,
     connectionLimit: Number(process.env.SQL_CONNECTION_LIMIT || 5),
     queueLimit: 0,
@@ -94,8 +119,8 @@ const ddl = [
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     date VARCHAR(32) NOT NULL,
     model VARCHAR(255) NOT NULL,
-    start INT NOT NULL,
-    end INT NOT NULL,
+    \`start\` INT NOT NULL,
+    \`end\` INT NOT NULL,
     expected INT NOT NULL DEFAULT 0,
     scanned INT NOT NULL DEFAULT 0,
     missing INT NOT NULL DEFAULT 0,

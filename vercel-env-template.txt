@@ -1,4 +1,8 @@
-MONGO_URI=mongodb+srv://<mongodb_user>:<mongodb_password>@<cluster-name>.mongodb.net/atomberg?retryWrites=true&w=majority
+DATABASE_URL=mysql://<aiven_user>:<aiven_password>@<aiven_host>:<aiven_port>/<database>?ssl-mode=REQUIRED
+MYSQL_SSL=true
+# Optional only if using a downloaded Aiven CA certificate:
+# SQL_CA_CERT=<paste-ca-certificate-here>
+# SQL_CA_CERT_PATH=./ca.pem
 FRONTEND_URL=https://<your-vercel-project>.vercel.app
 JWT_SECRET=<paste-a-long-random-secret-here>
 ADMIN_PASSWORD=<admin-panel-password>

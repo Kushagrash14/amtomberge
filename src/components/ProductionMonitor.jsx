@@ -1,5 +1,5 @@
 // PG GROUP — Production Monitor
-// Fully migrated from Google Apps Script → MongoDB REST API
+// Fully migrated from Google Apps Script to Aiven MySQL REST API
 // All callServer() and getSheet() calls replaced with apiFetch()
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -417,19 +417,18 @@ const LOGIN_CSS = `
 // APP ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [session,   setSession]   = useState(null);
   const [checking,  setChecking]  = useState(true);
   const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
     const saved = loadSession();
-    if (saved) { setSession(saved); setShowLogin(false); }
+    if (saved) { setShowLogin(false); }
     else        { setShowLogin(true); }
     setChecking(false);
   }, []);
 
-  const handleLogin  = (d) => { saveSession(d); setSession(d); setShowLogin(false); };
-  const handleLogout = ()  => { clearSession(); setSession(null); setShowLogin(true); };
+  const handleLogin  = (d) => { saveSession(d); setShowLogin(false); };
+  const handleLogout = ()  => { clearSession(); setShowLogin(true); };
 
   if (checking) return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1a1a2e,#0f3460)", display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -439,7 +438,7 @@ export default function App() {
 
   return (
     <>
-      <ProductionMonitor session={session} onLogout={handleLogout} />
+      <ProductionMonitor onLogout={handleLogout} />
       {showLogin && <LoginPopup onLogin={handleLogin} />}
     </>
   );
@@ -617,7 +616,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PRODUCTION MONITOR
 // ═══════════════════════════════════════════════════════════════════════════════
-function ProductionMonitor({ session, onLogout }) {
+function ProductionMonitor({ onLogout }) {
   const [activeTab,          setActiveTab]          = useState("dashboard");
   const [adminUnlocked,      setAdminUnlocked]      = useState(false);
   const [showLogoutConfirm,  setShowLogoutConfirm]  = useState(false);
@@ -1478,8 +1477,6 @@ function ProductionMonitor({ session, onLogout }) {
         </div>
 
         {(() => {
-          const role        = session?.role || "operator";
-          const isAdmin     = role === "admin" || role === "superadmin";
           const tabs = [
             { id:"dashboard", label:"📊 Dashboard", show:true },
             { id:"scanning",  label:"🔍 Scanning",  show:true },

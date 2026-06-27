@@ -6,7 +6,7 @@ import indexRouter from './routes/index.js';
 import authRouter from './routes/auth.route.js';
 import apiRouter from './routes/api.route.js';
 import productionRouter from './routes/production.route.js';
-import connectDB from './db/config/mongoose.config.js';
+import connectDB from './db/config/sql.config.js';
 import insertUser from './middleware/insertUser.js';
 
 dotenv.config();
@@ -39,16 +39,16 @@ const mountApi = (path, router) => {
 };
 
 const dbErrorResponse = (error) => {
-  if (!process.env.MONGO_URI?.trim() || error?.message === 'MONGO_URI_MISSING') {
+  if (!process.env.DATABASE_URL?.trim() || error?.message === 'DATABASE_URL_MISSING') {
     return {
       success: false,
-      message: 'MONGO_URI missing - add env vars and redeploy',
+      message: 'DATABASE_URL missing - add Aiven MySQL env vars and redeploy',
     };
   }
   return {
     success: false,
     message: 'Database connection failed',
-    hint: 'MongoDB Atlas Network Access must allow this deployment',
+    hint: 'Check Aiven MySQL credentials, SSL mode, and network access',
   };
 };
 

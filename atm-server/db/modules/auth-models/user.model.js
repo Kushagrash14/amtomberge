@@ -1,33 +1,16 @@
-import mongoose from "mongoose";
+import { SqlModel } from '../sql-model.js';
 
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-  },
-  name: {
-    type: String,
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true,
-  },
- 
-  otp: {
-    type: String,
-  },
-  expireOtpAt: {
-    type: Date,
-  },
-  role: {
-    type: String,
-    enum: ['operator', 'user', 'admin', 'superadmin'],
-    default: 'user',
-  },
-}, { timestamps: true });
+class User extends SqlModel {
+  static table = 'users';
+  static fields = ['id', 'username', 'name', 'email', 'otp', 'expireOtpAt', 'role', 'createdAt', 'updatedAt'];
+  static writableFields = ['username', 'name', 'email', 'otp', 'expireOtpAt', 'role'];
+  static defaults = { role: 'user' };
 
-const User = mongoose.model('User', userSchema);
+  constructor(data = {}) {
+    const normalized = { ...data };
+    if (normalized.email) normalized.email = String(normalized.email).trim().toLowerCase();
+    super(normalized);
+  }
+}
+
 export default User;
