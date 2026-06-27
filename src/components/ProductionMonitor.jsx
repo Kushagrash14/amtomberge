@@ -478,7 +478,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
     if (!v || !v.includes("@")) { setErr1("Please enter a valid email address."); return; }
     setErr1(""); setLoading(true); setLoadTxt(`Sending OTP to ${v}...`);
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/login?email=${encodeURIComponent(v)}`);
+      const res  = await fetch(`${API_BASE}/auth/login?email=${encodeURIComponent(v)}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setOtpMsg(data.message || "OTP sent to your email!");
@@ -494,7 +494,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
     if (otpVal.length !== 6) { setErr2("Please enter all 6 digits."); return; }
     setErr2(""); setLoading(true); setLoadTxt("Verifying OTP...");
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/verify/otp?email=${encodeURIComponent(email.trim())}&otp=${encodeURIComponent(otpVal)}`);
+      const res  = await fetch(`${API_BASE}/auth/verify/otp?email=${encodeURIComponent(email.trim())}&otp=${encodeURIComponent(otpVal)}`);
       const data = await res.json();
       if (res.ok && data.success) {
         clearInterval(timerRef.current);
