@@ -1,33 +1,28 @@
 import userModel from "../db/modules/auth-models/user.model.js";
 
 let seeded = false;
+export const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "software.2040@pgel.in").trim().toLowerCase();
 
 const insertUser = async () => {
   if (seeded) return;
 
   try {
-    const email = "software.2040@pgel.in"; // Replace with the email you want to check
-
-    const existingUser = await userModel.findOne({ email });
-    if (existingUser) {
-      seeded = true;
-      console.log("User already exists:", existingUser);
-      return 
-    }
-
-    const newUser = new userModel({
-      username: "itspradeep",
-      name: "pradeep",
-      email: email,
-      role: "superadmin",
-    });
-
-    await newUser.save();
+    const superAdmin = await userModel.findOneAndUpdate(
+      { email: SUPER_ADMIN_EMAIL },
+      {
+        $set: { role: "superadmin" },
+        $setOnInsert: {
+          username: "superadmin",
+          name: "Super Admin",
+          email: SUPER_ADMIN_EMAIL,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
     seeded = true;
-    console.log("New user inserted:", newUser);
+    console.log("Super admin ready:", superAdmin.email);
   } catch (error) {
     console.error("Error inserting user:", error);
-    return
   }
 };
 

@@ -13,7 +13,6 @@ import {
 } from '../db/modules/production-models/data.models.js';
 
 const router = express.Router();
-const SUPER_ADMIN_EMAIL = 'pradeeprajput898989@gmail.com';
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -129,7 +128,7 @@ const handlers = {
       message: 'OTP verified successfully',
       token: getToken(user),
       name: user.name || user.username || user.email,
-      role: user.email === SUPER_ADMIN_EMAIL ? 'superadmin' : (user.role || 'user'),
+      role: user.role || 'user',
     };
   },
 

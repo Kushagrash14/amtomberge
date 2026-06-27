@@ -3,7 +3,6 @@ import {
   ProductionModel, SerialRange, Manpower
 } from '../db/modules/production-models/data.models.js';
 import userModel from '../db/modules/auth-models/user.model.js';
-import jwt from 'jsonwebtoken';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const ok  = (res, data)        => res.json({ success: true,  ...data });
@@ -20,7 +19,7 @@ export const getAllSettings = async (req, res) => {
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
     ok(res, { settings });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load settings', 500);
   }
 };
@@ -33,7 +32,7 @@ export const saveSetting = async (req, res) => {
     if (!key) return err(res, 'key is required');
     await Setting.findOneAndUpdate({ key }, { value: String(value ?? '') }, { upsert: true, new: true });
     ok(res, { message: 'Setting saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save setting', 500);
   }
 };
@@ -54,7 +53,7 @@ export const getProductionData = async (req, res) => {
       ...rows.map(r => [r.timestamp, r.date, r.model, r.serial]),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load production data', 500);
   }
 };
@@ -101,7 +100,7 @@ export const getLastSerial = async (req, res) => {
     if (!last) return ok(res, { lastSerial: null, lastNum: 0 });
     const lastNum = parseInt((last.serial.match(/(\d+)$/) || ['','0'])[1]);
     ok(res, { lastSerial: last.serial, lastNum });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to get last serial', 500);
   }
 };
@@ -121,7 +120,7 @@ export const getIdleRecords = async (req, res) => {
       ...rows.map(r => [r.date, r.fromTime, r.toTime, r.duration, r.department, r.reason, r.slot]),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load idle records', 500);
   }
 };
@@ -134,7 +133,7 @@ export const addIdleTime = async (req, res) => {
     if (!date || !slot) return err(res, 'date and slot required');
     await IdleRecord.create({ date, fromTime, toTime, duration, department, reason, slot });
     ok(res, { message: 'Idle record saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save idle record', 500);
   }
 };
@@ -154,7 +153,7 @@ export const getReloads = async (req, res) => {
       ...rows.map(r => [r.date, r.slot, r.type, r.count, r.timestamp]),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load reloads', 500);
   }
 };
@@ -167,7 +166,7 @@ export const addReload = async (req, res) => {
     if (!date || !slot) return err(res, 'date and slot required');
     await ReloadRecord.create({ date, slot, type: type || 'Material', count: count || 1, timestamp });
     ok(res, { message: 'Reload saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save reload', 500);
   }
 };
@@ -185,7 +184,7 @@ export const getModels = async (req, res) => {
       ...rows.map(r => [r.name, r.customer]),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load models', 500);
   }
 };
@@ -198,7 +197,7 @@ export const saveModel = async (req, res) => {
     if (!modelName) return err(res, 'modelName is required');
     await ProductionModel.findOneAndUpdate({ name: modelName }, { customer: customer || '' }, { upsert: true, new: true });
     ok(res, { message: 'Model saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save model', 500);
   }
 };
@@ -209,7 +208,7 @@ export const deleteModel = async (req, res) => {
     const { name } = req.params;
     await ProductionModel.deleteOne({ name });
     ok(res, { message: 'Model deleted' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to delete model', 500);
   }
 };
@@ -229,7 +228,7 @@ export const getSerialRanges = async (req, res) => {
       ...rows.map(r => [r.date, r.model, r.start, r.end, r.expected, r.scanned, r.missing]),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load serial ranges', 500);
   }
 };
@@ -246,7 +245,7 @@ export const setSerialRange = async (req, res) => {
       { upsert: true, new: true }
     );
     ok(res, { message: 'Serial range saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save serial range', 500);
   }
 };
@@ -273,7 +272,7 @@ export const getManpower = async (req, res) => {
       [row ? row.manpower : 0],
     ];
     ok(res, { data, manpower: row ? row.manpower : 0 });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load manpower', 500);
   }
 };
@@ -286,7 +285,7 @@ export const setManpower = async (req, res) => {
     if (!date || manpower == null) return err(res, 'date and manpower required');
     await Manpower.findOneAndUpdate({ date }, { manpower: Number(manpower) }, { upsert: true, new: true });
     ok(res, { message: 'Manpower saved' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to save manpower', 500);
   }
 };
@@ -304,7 +303,7 @@ export const getUsers = async (req, res) => {
       ...rows.map(r => [r.email, r.name || r.username || '', r.role || 'user']),
     ];
     ok(res, { data });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to load users', 500);
   }
 };
@@ -320,7 +319,7 @@ export const addUser = async (req, res) => {
     if (exists) return err(res, 'User already exists');
     await userModel.create({ email: email.trim().toLowerCase(), username: name, name, role });
     ok(res, { message: 'User added' });
-  } catch (e) {
+  } catch {
     err(res, 'Failed to add user', 500);
   }
 };
@@ -337,7 +336,7 @@ export const verifyAdmin = async (req, res) => {
     const correct = process.env.ADMIN_PASSWORD || 'admin123';
     if (password === correct) return ok(res, { verified: true });
     err(res, 'Incorrect password', 401);
-  } catch (e) {
+  } catch {
     err(res, 'Verification failed', 500);
   }
 };

@@ -4,7 +4,6 @@ import userModel from '../db/modules/auth-models/user.model.js';
 import { sendOTPEmail } from '../services/node-mailer/otpMailService.js';
 
 const router = express.Router();
-const SUPER_ADMIN_EMAIL = 'pradeeprajput898989@gmail.com';
 
 // Generate a random 6-digit OTP
 const generateOTP = () => {
@@ -85,7 +84,7 @@ router.get("/verify/otp", async (req, res) => {
       success: true,
       token: getToken(user),
       name: user.name || user.username || user.email,
-      role: user.email === SUPER_ADMIN_EMAIL ? 'superadmin' : (user.role || 'user'),
+      role: user.role || 'user',
     });
   } catch (error) {
     console.error("Error during OTP verification:", error);

@@ -11,7 +11,6 @@ if (typeof window !== "undefined") window.Chart = Chart;
 // ─── Constants ────────────────────────────────────────────────────────────────
 // FIX 1: API_BASE was missing its fallback value — fixed
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3000";
-const SUPER_ADMIN_EMAIL = "software.2040@pgel.in";
 
 // ─── apiFetch — single source of truth for all HTTP calls ────────────────────
 const apiFetch = async (method, path, body) => {

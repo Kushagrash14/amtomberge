@@ -89,7 +89,7 @@ app.use(async (req, res, next) => {
   if (skipDbPaths.has(req.path)) return next();
   try {
     await connectDB();
-    // await insertUser();
+    await insertUser();
     next();
   } catch (error) {
     console.error('Database middleware error:', error?.message || error);
