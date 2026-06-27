@@ -265,8 +265,9 @@ const handlers = {
   },
 
   async serverVerifyAdmin(body) {
-    const password = String(body?.password || body || '');
-    return password === (process.env.ADMIN_PASSWORD || 'admin123');
+    const password = String(body?.password || body || '').trim();
+    const correct = String(process.env.ADMIN_PASSWORD || 'admin123').trim();
+    return password === correct;
   },
 
   async serverAddUser(body) {

@@ -334,8 +334,8 @@ export const addUser = async (req, res) => {
 // body: { password }
 export const verifyAdmin = async (req, res) => {
   try {
-    const { password } = req.body;
-    const correct = process.env.ADMIN_PASSWORD || 'admin123';
+    const password = String(req.body?.password || '').trim();
+    const correct = String(process.env.ADMIN_PASSWORD || 'admin123').trim();
     if (password === correct) return ok(res, { verified: true });
     err(res, 'Incorrect password', 401);
   } catch {
