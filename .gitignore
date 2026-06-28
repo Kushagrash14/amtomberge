@@ -16,6 +16,10 @@ dist-ssr
 .env.example
 copy-paste.env
 
+# Local old Google Apps Script reference files
+src/components/code.gs
+src/components/index.html
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
