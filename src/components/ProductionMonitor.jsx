@@ -374,19 +374,12 @@ const saveSession  = (d) => { try { sessionStorage.setItem(SESSION_KEY, JSON.str
 const loadSession  = () => { try { const r = sessionStorage.getItem(SESSION_KEY); if (!r) return null; const p = JSON.parse(r); return p?.token ? p : null; } catch (e) { return null; } };
 const clearSession = () => { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} };
 
-// ─── Login popup CSS ──────────────────────────────────────────────────────────
-const POPUP_CSS = `
-  .lp-overlay{position:fixed;inset:0;z-index:9999;background:rgba(10,10,30,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;animation:lp-fadein .25s ease}
-  @keyframes lp-fadein{from{opacity:0}to{opacity:1}}
-  .lp-card-wrap{animation:lp-slidein .28s cubic-bezier(.16,1,.3,1)}
-  @keyframes lp-slidein{from{opacity:0;transform:translateY(24px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-`;
-
+// ─── Login page CSS ───────────────────────────────────────────────────────────
 const LOGIN_CSS = `
-  .lg-body{font-family:'Inter',sans-serif;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
-  .lg-body-plain{font-family:'Inter',sans-serif}
-  .lg-card{background:#fff;border-radius:22px;padding:40px 36px;max-width:420px;width:100%;box-shadow:0 32px 80px rgba(0,0,0,.45)}
+  .lg-body{font-family:'Inter',sans-serif;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow:auto}
+  .lg-card{background:#fff;border-radius:22px;padding:40px 36px;max-width:420px;width:100%;box-shadow:0 32px 80px rgba(0,0,0,.45);box-sizing:border-box}
   .lg-logo{text-align:center;margin-bottom:8px}
+  .lg-logo img{height:70px;display:inline-block;border-radius:10px;padding:4px;background:#fff}
   .lg-brand{text-align:center;font-size:24px;font-weight:800;color:#1a1a2e;margin:8px 0 2px}
   .lg-sub{text-align:center;color:#6b7280;font-size:12px;margin-bottom:20px}
   .lg-hr{border:none;border-top:1px solid #f0f0f0;margin:0 0 20px}
@@ -409,8 +402,29 @@ const LOGIN_CSS = `
   .lg-ebox{background:#fef3f8;padding:9px 12px;border-radius:7px;font-size:12px;color:#374151;margin-bottom:12px;border:1px solid #f0adc2;word-break:break-all}
   .lg-foot{text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid #f0f0f0;color:#9ca3af;font-size:10px}
   .lg-row2{display:flex;gap:8px;margin-top:8px}
-  .lg-spin{display:inline-block;width:16px;height:16px;border:2px solid #fca5a5;border-top-color:#C41E4E;border-radius:50%;animation:lgspin .7s linear infinite;vertical-align:middle;margin-right:6px}
+  .lg-loading{text-align:center;padding:24px}
+  .lg-spin{display:inline-block;width:32px;height:32px;border:3px solid #f0f0f0;border-top-color:#C41E4E;border-radius:50%;animation:lgspin .8s linear infinite}
+  .lg-loading p{margin-top:12px;color:#374151;font-weight:600;font-size:13px}
   @keyframes lgspin{to{transform:rotate(360deg)}}
+  @media (max-height:700px){
+    .lg-body{align-items:flex-start;padding:12px 16px}
+    .lg-card{padding:24px 28px}
+    .lg-logo img{height:56px}
+    .lg-brand{font-size:22px;margin-top:6px}
+    .lg-sub{margin-bottom:14px}
+    .lg-hr{margin-bottom:14px}
+    .lg-fg{margin-bottom:10px}
+    .lg-al{margin-bottom:10px;padding:8px 10px}
+    .lg-otp-row{margin:8px 0}
+    .lg-foot{margin-top:12px;padding-top:10px}
+    .lg-loading{padding:16px}
+  }
+  @media (max-width:480px){
+    .lg-body{padding:12px}
+    .lg-card{padding:28px 22px}
+    .lg-otp-row{gap:5px}
+    .lg-otp-inp{width:40px;font-size:20px}
+  }
 `;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -438,28 +452,13 @@ export default function App() {
 
   return (
     <>
-      <ProductionMonitor onLogout={handleLogout} />
-      {showLogin && <LoginPopup onLogin={handleLogin} />}
-    </>
-  );
-}
-
-// ─── Login popup wrapper ──────────────────────────────────────────────────────
-function LoginPopup({ onLogin }) {
-  return (
-    <>
-      <style>{POPUP_CSS}</style>
-      <div className="lp-overlay">
-        <div className="lp-card-wrap">
-          <LoginPage onLogin={onLogin} insidePopup />
-        </div>
-      </div>
+      {showLogin ? <LoginPage onLogin={handleLogin} /> : <ProductionMonitor onLogout={handleLogout} />}
     </>
   );
 }
 
 // ─── Login page ───────────────────────────────────────────────────────────────
-function LoginPage({ onLogin, insidePopup = false }) {
+function LoginPage({ onLogin }) {
   const [step,    setStep]    = useState(1);
   const [email,   setEmail]   = useState("");
   const [otp,     setOtp]     = useState(["","","","","",""]);
@@ -482,7 +481,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
   useEffect(() => () => clearInterval(timerRef.current), []);
   const timerStr = `${String(Math.floor(timer / 60)).padStart(2,"0")}:${String(timer % 60).padStart(2,"0")}`;
 
-  // FIX 6: All auth URLs now consistently use /api/auth prefix
+  // FIX 6: All auth URLs now consistently use the configured auth API prefix
   const sendOTP = async () => {
     const v = email.trim();
     if (!v || !v.includes("@")) { setErr1("Please enter a valid email address."); return; }
@@ -523,7 +522,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
     clearInterval(timerRef.current); setErr2("");
     setLoading(true); setLoadTxt("Resending OTP...");
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/login?email=${encodeURIComponent(email.trim())}`);
+      const res  = await fetch(`${API_BASE}/auth/login?email=${encodeURIComponent(email.trim())}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setOtpMsg("New OTP sent!"); setOtp(["","","","","",""]);
@@ -552,15 +551,15 @@ function LoginPage({ onLogin, insidePopup = false }) {
     <div className="lg-card">
       <div className="lg-logo">
         <img src="https://cms-complaint-avidence.s3.eu-north-1.amazonaws.com/pg-logo-Photoroom.png"
-          height="70" style={{ display:"inline-block", borderRadius:10, padding:4, background:"#fff" }} alt="PG Logo" />
+          alt="PG Logo" />
       </div>
       <div className="lg-brand">PG GROUP</div>
       <div className="lg-sub">Production Monitor — Secure Login</div>
       <hr className="lg-hr" />
       {loading && (
-        <div style={{ textAlign:"center", padding:"24px 0" }}>
+        <div className="lg-loading">
           <div className="lg-spin" />
-          <span style={{ fontSize:13, color:"#374151", fontWeight:600 }}>{loadTxt || "Please wait..."}</span>
+          <p>{loadTxt || "Please wait..."}</p>
         </div>
       )}
       {!loading && step === 1 && (
@@ -608,7 +607,7 @@ function LoginPage({ onLogin, insidePopup = false }) {
   return (
     <>
       <style>{LOGIN_CSS}</style>
-      {insidePopup ? <div className="lg-body-plain">{card}</div> : <div className="lg-body">{card}</div>}
+      <div className="lg-body">{card}</div>
     </>
   );
 }
