@@ -239,7 +239,7 @@ export class SqlModel {
     }
 
     if (!options.upsert) return null;
-    const insertDoc = this.getUpdateDocument(filter, update, true);
+    const insertDoc = { ...filter, ...this.getUpdateDocument(filter, update, true) };
     return this.create(insertDoc);
   }
 

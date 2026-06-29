@@ -131,6 +131,7 @@ const SLOTS = [
   "11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00",
   "15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00",
 ];
+const SLOT_LABELS = SLOTS.map(s => s.split("-")[0]);
 const DEF_TARGETS = [170, 200, 200, 170, 200, 200, 100, 200, 200, 170, 200, 100];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -856,7 +857,7 @@ function ProductionMonitor({ onLogout }) {
     Promise.all([p1, p2, p3]).then(() => {
       scannedRef.current = newScanned;
       const totalProd = newHourly.reduce((a, h) => a + (h.prod || 0), 0);
-      setS({ date:today, totalProd, hourly:newHourly, serials:newSerials, reloads:newReloads, idles:newIdles, models:S.models, manpower:manpowerRef.current });
+      setS(prev => ({ ...prev, date:today, totalProd, hourly:newHourly, serials:newSerials, reloads:newReloads, idles:newIdles, manpower:manpowerRef.current }));
       loadingRef.current = false; clearTimeout(loadTimerRef.current);
       if (curModelRef.current) refreshNextExpected(curModelRef.current, newSerials);
       setSyncUI("", "Loaded " + totalProd + " units ✓");
@@ -866,7 +867,7 @@ function ProductionMonitor({ onLogout }) {
       console.error("loadAll error:", e);
       setSyncUI("error", "Reload failed — showing cached data");
     });
-  }, [appSettings, S.models, refreshNextExpected, setSyncUI]);
+  }, [appSettings, refreshNextExpected, setSyncUI]);
 
   const loadModels = useCallback(() => {
     getSheet("Models").then(res => {
@@ -885,7 +886,7 @@ function ProductionMonitor({ onLogout }) {
     const today = todayStr();
     getSheet("Serial_Ranges").then(res => {
       if (res.data && res.data.length > 1) {
-        for (let i = res.data.length - 1; i >= 1; i--) {
+        for (let i = 1; i < res.data.length; i++) {
           if (parseSheetDate(res.data[i][0]) === today) {
             const sr = { model:res.data[i][1], start:parseInt(res.data[i][2]), end:parseInt(res.data[i][3]), date:today };
             setSRange(sr); sRangeRef.current = sr; setRngDisp(true); return;
@@ -893,6 +894,7 @@ function ProductionMonitor({ onLogout }) {
         }
       }
       setSRange({ model:"", start:0, end:0, date:"" }); sRangeRef.current = { model:"", start:0, end:0, date:"" };
+      setRngDisp(false);
     }).catch(() => {});
   }, []);
 
@@ -1147,9 +1149,13 @@ function ProductionMonitor({ onLogout }) {
     if (isNaN(sn) || isNaN(en) || sn === 0) { alert("Invalid serial numbers."); return; }
     if (sn >= en) { alert("End serial must be greater than start."); return; }
     const sr = { model:rngModel, start:sn, end:en, date:todayStr() };
-    setSRange(sr); sRangeRef.current = sr; setRngDisp(true);
-    callServer("serverSetSerialRange", { action:"setSerialRange", date:sr.date, model:rngModel, start:sn, end:en, expected:en-sn+1, scanned:0, missing:en-sn+1 }).catch(() => {});
-    alert("✅ Range set!\nModel: " + rngModel + "\nRange: " + pad5(sn) + " → " + pad5(en));
+    callServer("serverSetSerialRange", { action:"setSerialRange", date:sr.date, model:rngModel, start:sn, end:en, expected:en-sn+1, scanned:0, missing:en-sn+1 })
+      .then(res => {
+        if (res && res.success === false) throw new Error(res.message || "Range save failed");
+        setSRange(sr); sRangeRef.current = sr; setRngDisp(true);
+        alert("Range saved!\nModel: " + rngModel + "\nRange: " + pad5(sn) + " -> " + pad5(en));
+      })
+      .catch(e => alert("Range database mein save nahi hua: " + (e.message || "Server error")));
   }, [rngModel, rngStart, rngEnd]);
 
   const addModel = useCallback(() => {
@@ -1157,8 +1163,18 @@ function ProductionMonitor({ onLogout }) {
     if (!n || !c) { alert("Enter both model name and customer name."); return; }
     if (S.models.find(m => m.name === n)) { alert("Model already exists."); return; }
     callServer("serverSaveModel", { action:"saveModel", modelName:n, customer:c })
-      .then(() => { setS(prev => ({ ...prev, models:[...prev.models, { name:n, customer:c }] })); setNewMdl(""); setNewCust(""); alert("✅ Model saved!"); })
-      .catch(() => { setS(prev => ({ ...prev, models:[...prev.models, { name:n, customer:c }] })); setNewMdl(""); setNewCust(""); alert("⚠️ Saved locally."); });
+      .then(res => {
+        if (res && res.success === false) throw new Error(res.message || "Model save failed");
+        setS(prev => {
+          const models = prev.models.some(m => m.name === n)
+            ? prev.models.map(m => m.name === n ? { name:n, customer:c } : m)
+            : [...prev.models, { name:n, customer:c }];
+          return { ...prev, models };
+        });
+        setNewMdl(""); setNewCust("");
+        alert("Model saved to database!");
+      })
+      .catch(e => alert("Model database mein save nahi hua: " + (e.message || "Server error")));
   }, [newMdl, newCust, S.models]);
 
   const delModel = useCallback((name) => {
@@ -1723,27 +1739,47 @@ function ReportsTab({ rptDaily, rptSerials, rptIdle, rptMissing, rptContent }) {
 function ChartsTab({ S, manpower }) {
   const refs   = { prod:useRef(), upph:useRef(), uph:useRef(), ach:useRef(), idle:useRef(), rld:useRef() };
   const charts = useRef({});
-  const lbls   = SLOTS.map(s => s.split("-")[0]);
+  const lbls   = SLOT_LABELS;
 
   const build = useCallback(() => {
     if (!window.Chart) return;
     const C    = window.Chart;
-    const base = { responsive:true, maintainAspectRatio:false, animation:{duration:350}, plugins:{legend:{labels:{font:{size:10},boxWidth:10}}} };
-    const destroy = (k) => { try { if (charts.current[k]) { charts.current[k].destroy(); charts.current[k] = null; } } catch (e) {} };
-    Object.keys(charts.current).forEach(destroy);
+    const base = { responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{labels:{font:{size:10},boxWidth:10}}} };
+    const hourly = S.hourly || [];
+    const prodData = hourly.map(h => h.prod || 0);
+    const targetData = hourly.map(h => h.target || 0);
+    const upphData = hourly.map(h => (manpower > 0 && (h.prod || 0) > 0) ? parseFloat(((h.prod || 0) / manpower).toFixed(2)) : 0);
+    const tt = hourly.reduce((a,h) => a + (h.target || 0), 0);
+    const pct = tt > 0 ? Math.min(Math.round(S.totalProd / tt * 100), 100) : 0;
+    const dm = {};
+    (S.idles || []).forEach(r => { if (r.dept && r.duration) dm[r.dept] = (dm[r.dept] || 0) + parseFloat(r.duration); });
+    const iL = Object.keys(dm), iV = iL.map(k => dm[k]);
+    const rm = {};
+    (S.reloads || []).forEach(r => { rm[r.type] = (rm[r.type] || 0) + (r.count || 1); });
+    const rL = Object.keys(rm), rV = rL.map(k => rm[k]);
 
-    if (refs.prod.current) charts.current.prod = new C(refs.prod.current.getContext("2d"), { type:"bar", data:{ labels:lbls, datasets:[{ label:"Production", data:(S.hourly||[]).map(h=>h.prod||0), backgroundColor:"rgba(196,30,78,.7)", borderColor:"#C41E4E", borderWidth:1, borderRadius:3 },{ label:"Target", data:(S.hourly||[]).map(h=>h.target||0), type:"line", borderColor:"#1a1a2e", borderWidth:2, pointRadius:2, fill:false, tension:.3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}});
-    if (refs.ach.current) { const tt=( S.hourly||[]).reduce((a,h)=>a+(h.target||0),0); const pct=tt>0?Math.min(Math.round(S.totalProd/tt*100),100):0; charts.current.ach=new C(refs.ach.current.getContext("2d"),{type:"doughnut",data:{labels:["Achieved ("+pct+"%)","Gap ("+(100-pct)+"%)"],datasets:[{data:[pct,Math.max(0,100-pct)],backgroundColor:["#10b981","#fee2e2"],borderWidth:2}]},options:{...base,cutout:"65%"}}); }
-    if (refs.idle.current) { const dm={}; (S.idles||[]).forEach(r=>{if(r.dept&&r.duration)dm[r.dept]=(dm[r.dept]||0)+parseFloat(r.duration);}); const iL=Object.keys(dm),iV=iL.map(k=>dm[k]); charts.current.idle=new C(refs.idle.current.getContext("2d"),{type:"bar",data:{labels:iL.length?iL:["No Data"],datasets:[{label:"Idle (min)",data:iV.length?iV:[0],backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)),borderRadius:3}]},options:{...base,scales:{y:{beginAtZero:true}},plugins:{...base.plugins,legend:{display:false}}}}); }
-    if (refs.rld.current) { const rm={}; (S.reloads||[]).forEach(r=>{rm[r.type]=(rm[r.type]||0)+(r.count||1);}); const rL=Object.keys(rm),rV=rL.map(k=>rm[k]); charts.current.rld=new C(refs.rld.current.getContext("2d"),{type:"pie",data:{labels:rL.length?rL:["No Data"],datasets:[{data:rV.length?rV:[1],backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6"].slice(0,Math.max(1,rL.length)),borderWidth:2}]},options:{...base}}); }
-    if (refs.upph.current) charts.current.upph = new C(refs.upph.current.getContext("2d"), { type:"line", data:{ labels:lbls, datasets:[{ label:"UPPH", data:(S.hourly||[]).map(h=>(manpower>0&&(h.prod||0)>0)?parseFloat(((h.prod||0)/manpower).toFixed(2)):0), borderColor:"#10b981", backgroundColor:"rgba(16,185,129,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}});
-    if (refs.uph.current)  charts.current.uph  = new C(refs.uph.current.getContext("2d"),  { type:"line", data:{ labels:lbls, datasets:[{ label:"UPH",  data:(S.hourly||[]).map(h=>h.prod||0), borderColor:"#C41E4E", backgroundColor:"rgba(196,30,78,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}});
+    const upsert = (key, ref, config, update) => {
+      if (!ref.current) return;
+      if (!charts.current[key]) charts.current[key] = new C(ref.current.getContext("2d"), config);
+      update(charts.current[key]);
+      charts.current[key].update("none");
+    };
+
+    upsert("prod", refs.prod, { type:"bar", data:{ labels:lbls, datasets:[{ label:"Production", data:prodData, backgroundColor:"rgba(196,30,78,.7)", borderColor:"#C41E4E", borderWidth:1, borderRadius:3 },{ label:"Target", data:targetData, type:"line", borderColor:"#1a1a2e", borderWidth:2, pointRadius:2, fill:false, tension:.3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; chart.data.datasets[1].data = targetData; });
+    upsert("ach", refs.ach, { type:"doughnut", data:{ labels:["Achieved ("+pct+"%)","Gap ("+(100-pct)+"%)"], datasets:[{ data:[pct,Math.max(0,100-pct)], backgroundColor:["#10b981","#fee2e2"], borderWidth:2 }]}, options:{...base,cutout:"65%"}}, chart => { chart.data.labels = ["Achieved ("+pct+"%)","Gap ("+(100-pct)+"%)"]; chart.data.datasets[0].data = [pct, Math.max(0,100-pct)]; });
+    upsert("idle", refs.idle, { type:"bar", data:{ labels:iL.length?iL:["No Data"], datasets:[{ label:"Idle (min)", data:iV.length?iV:[0], backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)), borderRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}},plugins:{...base.plugins,legend:{display:false}}}}, chart => { chart.data.labels = iL.length ? iL : ["No Data"]; chart.data.datasets[0].data = iV.length ? iV : [0]; chart.data.datasets[0].backgroundColor = ["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)); });
+    upsert("rld", refs.rld, { type:"pie", data:{ labels:rL.length?rL:["No Data"], datasets:[{ data:rV.length?rV:[1], backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6"].slice(0,Math.max(1,rL.length)), borderWidth:2 }]}, options:{...base}}, chart => { chart.data.labels = rL.length ? rL : ["No Data"]; chart.data.datasets[0].data = rV.length ? rV : [1]; chart.data.datasets[0].backgroundColor = ["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6"].slice(0,Math.max(1,rL.length)); });
+    upsert("upph", refs.upph, { type:"line", data:{ labels:lbls, datasets:[{ label:"UPPH", data:upphData, borderColor:"#10b981", backgroundColor:"rgba(16,185,129,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = upphData; });
+    upsert("uph", refs.uph, { type:"line", data:{ labels:lbls, datasets:[{ label:"UPH", data:prodData, borderColor:"#C41E4E", backgroundColor:"rgba(196,30,78,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; });
   }, [S, manpower, lbls]);
 
   useEffect(() => {
-    setTimeout(build, 150);
-    return () => { Object.keys(charts.current).forEach(k => { try { if (charts.current[k]) charts.current[k].destroy(); } catch (e) {} }); };
+    build();
   }, [build]);
+
+  useEffect(() => {
+    return () => { Object.keys(charts.current).forEach(k => { try { if (charts.current[k]) charts.current[k].destroy(); } catch (e) {} }); };
+  }, []);
 
   return (
     <div className="tab-pane">
