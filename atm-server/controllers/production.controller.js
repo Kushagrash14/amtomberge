@@ -8,6 +8,55 @@ import userModel from '../db/modules/auth-models/user.model.js';
 const ok  = (res, data)        => res.json({ success: true,  ...data });
 const err = (res, msg, status = 400) => res.status(status).json({ success: false, message: msg });
 
+const extractSerialNum = (serial) => {
+  const match = String(serial || '').match(/(\d{1,10})$/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
+const normalizeRange = (range) => {
+  if (!range) return null;
+  const start = Number(range.start);
+  const end = Number(range.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return { ...range, start, end };
+};
+
+const getSerialProgress = async (date, model, range = null) => {
+  const rows = await ProductionEntry.find({ date, model }).lean();
+  let scanned = 0;
+  let lastNum = 0;
+  let lastSerial = null;
+
+  if (range) {
+    const byNumber = new Map();
+    rows.forEach((row) => {
+      const num = extractSerialNum(row.serial);
+      if (num === null || num < range.start || num > range.end) return;
+      scanned += 1;
+      if (!byNumber.has(num)) byNumber.set(num, row.serial);
+    });
+
+    let expected = range.start;
+    while (byNumber.has(expected)) {
+      lastNum = expected;
+      lastSerial = byNumber.get(expected);
+      expected += 1;
+    }
+
+    return { scanned, lastNum, lastSerial, nextExpected: expected };
+  }
+
+  rows.forEach((row) => {
+    const num = extractSerialNum(row.serial);
+    if (num !== null && num > lastNum) {
+      lastNum = num;
+      lastSerial = row.serial;
+    }
+  });
+
+  return { scanned: rows.length, lastNum, lastSerial, nextExpected: lastNum > 0 ? lastNum + 1 : null };
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -69,21 +118,44 @@ export const addSerial = async (req, res) => {
     const existing = await ProductionEntry.findOne({ serial });
     if (existing) return res.json({ success: false, message: 'Duplicate serial', code: 'DUPLICATE' });
 
-    // Sequence check — last serial for this model+date
-    const last = await ProductionEntry.findOne({ date, model }).sort({ createdAt: -1 }).lean();
-    if (last) {
-      const lastNum  = parseInt((last.serial.match(/(\d+)$/)  || ['','0'])[1]);
-      const thisNum  = parseInt((serial.match(/(\d+)$/)       || ['','0'])[1]);
-      if (thisNum !== lastNum + 1) {
-        return res.json({
-          success: false,
-          code: 'SEQUENCE_ERROR',
-          message: `Expected ${lastNum + 1}, got ${thisNum} (last: ${last.serial})`,
-        });
-      }
+    const thisNum = extractSerialNum(serial);
+    if (thisNum === null) {
+      return res.json({ success: false, code: 'SEQUENCE_ERROR', message: 'Serial number missing from barcode' });
+    }
+
+    const activeRange = normalizeRange(await SerialRange.findOne({ date, model }).sort({ createdAt: -1 }).lean());
+    if (activeRange && (thisNum < activeRange.start || thisNum > activeRange.end)) {
+      return res.json({
+        success: false,
+        code: 'SEQUENCE_ERROR',
+        message: `Serial out of range. Expected ${activeRange.start}-${activeRange.end}, got ${thisNum}`,
+      });
+    }
+
+    // Sequence check: active ranges must start at range.start, then continue by 1.
+    const progress = await getSerialProgress(date, model, activeRange);
+    const expectedNum = activeRange ? progress.nextExpected : (progress.lastNum > 0 ? progress.lastNum + 1 : null);
+    if (expectedNum !== null && thisNum !== expectedNum) {
+      return res.json({
+        success: false,
+        code: 'SEQUENCE_ERROR',
+        message: progress.lastSerial
+          ? `Expected ${expectedNum}, got ${thisNum} (last: ${progress.lastSerial})`
+          : `Expected first serial ${expectedNum}, got ${thisNum}`,
+      });
     }
 
     await ProductionEntry.create({ date, serial, model, timestamp });
+    if (activeRange) {
+      const range = await SerialRange.findOne({ id: activeRange.id });
+      if (range) {
+        const { scanned } = await getSerialProgress(date, model, activeRange);
+        const expectedTotal = Number(range.expected) || (activeRange.end - activeRange.start + 1);
+        range.scanned = scanned;
+        range.missing = Math.max(0, expectedTotal - scanned);
+        await range.save();
+      }
+    }
     ok(res, { message: 'Serial saved' });
   } catch (e) {
     if (e.code === 11000 || e.code === 'ER_DUP_ENTRY') {
@@ -98,10 +170,10 @@ export const getLastSerial = async (req, res) => {
   try {
     const { model, date } = req.query;
     if (!model || !date) return err(res, 'model and date required');
-    const last = await ProductionEntry.findOne({ model, date }).sort({ createdAt: -1 }).lean();
-    if (!last) return ok(res, { lastSerial: null, lastNum: 0 });
-    const lastNum = parseInt((last.serial.match(/(\d+)$/) || ['','0'])[1]);
-    ok(res, { lastSerial: last.serial, lastNum });
+    const activeRange = normalizeRange(await SerialRange.findOne({ date, model }).sort({ createdAt: -1 }).lean());
+    const { lastNum, lastSerial } = await getSerialProgress(date, model, activeRange);
+    if (!lastSerial) return ok(res, { lastSerial: null, lastNum: 0 });
+    ok(res, { lastSerial, lastNum });
   } catch {
     err(res, 'Failed to get last serial', 500);
   }

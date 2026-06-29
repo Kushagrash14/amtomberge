@@ -761,18 +761,43 @@ function ProductionMonitor({ onLogout }) {
 
   const refreshNextExpected = useCallback((model, serials) => {
     if (!model) { nextExpRef.current = null; lastSerRef.current = null; return; }
+    const sr = sRangeRef.current;
+    const rangeActive = sr.model === model && sr.date === todayStr();
     let maxNum = 0, maxSer = null;
-    serials.forEach(s => {
-      if (s.model !== model) return;
-      const n = extractNum(s.serial);
-      if (n !== null && n > maxNum) { maxNum = n; maxSer = s.serial; }
-    });
-    if (maxSer) {
-      lastSerRef.current = maxSer; nextExpRef.current = maxNum + 1;
-      setSeqBanner({ show:true, type:"ok", msg:"✅ Next expected: " + buildExpectedLabel(maxSer, maxNum+1) });
+    if (rangeActive) {
+      const byNumber = new Map();
+      serials.forEach(s => {
+        if (s.model !== model) return;
+        const n = extractNum(s.serial);
+        if (n === null || n < sr.start || n > sr.end) return;
+        if (!byNumber.has(n)) byNumber.set(n, s.serial);
+      });
+      let expected = sr.start;
+      while (byNumber.has(expected)) {
+        maxNum = expected;
+        maxSer = byNumber.get(expected);
+        expected++;
+      }
+      if (maxSer) {
+        lastSerRef.current = maxSer; nextExpRef.current = expected;
+        setSeqBanner({ show:true, type:"ok", msg:"✅ Next expected: " + buildExpectedLabel(maxSer, expected) });
+        return;
+      }
+      lastSerRef.current = null; nextExpRef.current = sr.start;
+      setSeqBanner({ show:true, type:"warn", msg:"Start sequence from serial number " + pad5(sr.start) + "." });
     } else {
-      lastSerRef.current = null; nextExpRef.current = null;
-      setSeqBanner({ show:true, type:"warn", msg:"⚡ No serials scanned yet for " + model + " today. First scan sets the sequence." });
+      serials.forEach(s => {
+        if (s.model !== model) return;
+        const n = extractNum(s.serial);
+        if (n !== null && n > maxNum) { maxNum = n; maxSer = s.serial; }
+      });
+      if (maxSer) {
+        lastSerRef.current = maxSer; nextExpRef.current = maxNum + 1;
+        setSeqBanner({ show:true, type:"ok", msg:"✅ Next expected: " + buildExpectedLabel(maxSer, maxNum+1) });
+      } else {
+        lastSerRef.current = null; nextExpRef.current = null;
+        setSeqBanner({ show:true, type:"warn", msg:"⚡ No serials scanned yet for " + model + " today. First scan sets the sequence." });
+      }
     }
   }, []);
 
@@ -786,6 +811,9 @@ function ProductionMonitor({ onLogout }) {
         if (res.lastNum > 0) {
           lastSerRef.current = res.lastSerial; nextExpRef.current = res.lastNum + 1;
           setSeqBanner({ show:true, type:"ok", msg:"✅ Next expected: " + buildExpectedLabel(res.lastSerial, res.lastNum+1) + "   (last scanned: " + res.lastSerial + ")" });
+        } else if (sRangeRef.current.model === model && sRangeRef.current.date === todayStr()) {
+          lastSerRef.current = null; nextExpRef.current = sRangeRef.current.start;
+          setSeqBanner({ show:true, type:"warn", msg:"Start sequence from serial number " + pad5(sRangeRef.current.start) + "." });
         } else {
           lastSerRef.current = null; nextExpRef.current = null;
           setSeqBanner({ show:true, type:"warn", msg:"⚡ No serials scanned yet for " + model + " today. First scan sets the sequence." });
@@ -1039,6 +1067,7 @@ function ProductionMonitor({ onLogout }) {
       }
       const model = parseModel(v);
       if (!model) { setSt1({ cls:"err", msg:"❌ Invalid format" }); setBoxSer(""); beep(false); alert("⚠️ INVALID FORMAT!\n" + v); return; }
+      const incomingNum = extractNum(v);
       const sr = sRangeRef.current;
       if (sr.model && sr.date === todayStr() && model === sr.model) {
         const sn = parseInt((v.match(/(\d+)$/) || ["","0"])[1]);
@@ -1047,6 +1076,14 @@ function ProductionMonitor({ onLogout }) {
           setBoxClass("fi-red"); setTimeout(() => setBoxClass(""), 1800); beep(false);
           alert("⚠️ SERIAL OUT OF RANGE!\nExpected: " + pad5(sr.start) + " – " + pad5(sr.end) + "\nScanned: " + pad5(sn)); return;
         }
+        const expectedInRange = nextExpRef.current !== null ? nextExpRef.current : sr.start;
+        if (!seqLoadRef.current && incomingNum !== null && incomingNum !== expectedInRange) {
+          const expLabel = lastSerRef.current ? buildExpectedLabel(lastSerRef.current, expectedInRange) : pad5(expectedInRange);
+          setSt1({ cls:"err", msg:"❌ Wrong sequence!" }); setBoxSer("");
+          setBoxClass("fi-red"); setTimeout(() => setBoxClass(""), 1800); beep(false);
+          setSeqBanner({ show:true, type:"err", msg:"❌ Invalid sequence! Expected: " + expLabel });
+          alert("⚠️ INVALID SEQUENCE!\n\nYou scanned:   " + v + "\nExpected next: " + expLabel + "\n\nPlease scan " + expLabel + " first."); return;
+        }
       }
       if (model !== curModelRef.current) {
         setSt1({ cls:"err", msg:"❌ Wrong Model: " + curModelRef.current }); setBoxSer("");
@@ -1054,7 +1091,6 @@ function ProductionMonitor({ onLogout }) {
         alert("⚠️ WRONG MODEL!\nExpected: " + curModelRef.current + "\nDetected: " + model); return;
       }
       if (nextExpRef.current !== null && !seqLoadRef.current) {
-        const incomingNum = extractNum(v);
         if (incomingNum !== null && incomingNum !== nextExpRef.current) {
           const expLabel = buildExpectedLabel(lastSerRef.current, nextExpRef.current);
           setSt1({ cls:"err", msg:"❌ Wrong sequence!" }); setBoxSer("");
@@ -1160,6 +1196,11 @@ function ProductionMonitor({ onLogout }) {
       .then(res => {
         if (res && res.success === false) throw new Error(res.message || "Range save failed");
         setSRange(sr); sRangeRef.current = sr; setRngDisp(true);
+        if (curModelRef.current === rngModel) {
+          lastSerRef.current = null;
+          nextExpRef.current = sn;
+          setSeqBanner({ show:true, type:"warn", msg:"Start sequence from serial number " + pad5(sn) + "." });
+        }
         alert("Range saved!\nModel: " + rngModel + "\nRange: " + pad5(sn) + " -> " + pad5(en));
       })
       .catch(e => alert("Range database mein save nahi hua: " + (e.message || "Server error")));

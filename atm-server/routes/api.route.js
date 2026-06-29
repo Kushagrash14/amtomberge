@@ -21,6 +21,50 @@ const extractNum = (serial) => {
   return match ? parseInt(match[1], 10) : null;
 };
 
+const normalizeRange = (range) => {
+  if (!range) return null;
+  const start = Number(range.start);
+  const end = Number(range.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return { row: range, start, end, expected: Number(range.expected) || (end - start + 1) };
+};
+
+const getSerialProgress = async (date, model, range = null) => {
+  const rows = await ProductionEntry.find({ date, model }).lean();
+  let scanned = 0;
+  let lastNum = 0;
+  let lastSerial = '';
+
+  if (range) {
+    const byNumber = new Map();
+    rows.forEach((row) => {
+      const num = extractNum(row.serial);
+      if (num === null || num < range.start || num > range.end) return;
+      scanned += 1;
+      if (!byNumber.has(num)) byNumber.set(num, row.serial);
+    });
+
+    let expected = range.start;
+    while (byNumber.has(expected)) {
+      lastNum = expected;
+      lastSerial = byNumber.get(expected);
+      expected += 1;
+    }
+
+    return { scanned, lastNum, lastSerial, nextExpected: expected };
+  }
+
+  rows.forEach((row) => {
+    const num = extractNum(row.serial);
+    if (num !== null && num > lastNum) {
+      lastNum = num;
+      lastSerial = row.serial;
+    }
+  });
+
+  return { scanned: rows.length, lastNum, lastSerial, nextExpected: lastNum > 0 ? lastNum + 1 : null };
+};
+
 const dayLabel = (date) => {
   const parsed = new Date(`${date}T00:00:00+05:30`);
   if (Number.isNaN(parsed.getTime())) return date;
@@ -150,16 +194,10 @@ const handlers = {
   },
 
   async serverGetLastSerial(body) {
-    const rows = await ProductionEntry.find({ model: body.model, date: body.date }).lean();
-    let lastNum = 0;
-    let lastSerial = '';
-    rows.forEach((row) => {
-      const num = extractNum(row.serial);
-      if (num !== null && num > lastNum) {
-        lastNum = num;
-        lastSerial = row.serial;
-      }
-    });
+    const model = String(body.model || '').trim();
+    const date = String(body.date || '').trim();
+    const range = normalizeRange(await SerialRange.findOne({ date, model }).sort({ createdAt: -1 }));
+    const { lastNum, lastSerial } = await getSerialProgress(date, model, range);
     return { success: true, lastNum, lastSerial };
   },
 
@@ -177,26 +215,38 @@ const handlers = {
     if (duplicate) return { success: false, message: 'duplicate serial already exists' };
 
     const incomingNum = extractNum(serial);
-    if (incomingNum !== null) {
-      const rows = await ProductionEntry.find({ model, date }).lean();
-      const maxNum = rows.reduce((max, row) => Math.max(max, extractNum(row.serial) || 0), 0);
-      if (maxNum > 0 && incomingNum !== maxNum + 1) {
-        return {
-          success: false,
-          code: 'SEQUENCE_ERROR',
-          message: `Expected next serial ${maxNum + 1}, received ${incomingNum}`,
-        };
-      }
+    if (incomingNum === null) {
+      return { success: false, code: 'SEQUENCE_ERROR', message: 'Serial number missing from barcode' };
+    }
+
+    const range = normalizeRange(await SerialRange.findOne({ date, model }).sort({ createdAt: -1 }));
+    if (range && (incomingNum < range.start || incomingNum > range.end)) {
+      return {
+        success: false,
+        code: 'SEQUENCE_ERROR',
+        message: `Serial out of range. Expected ${range.start}-${range.end}, received ${incomingNum}`,
+      };
+    }
+
+    const progress = await getSerialProgress(date, model, range);
+    const expectedNum = range ? progress.nextExpected : progress.nextExpected;
+    if (expectedNum !== null && incomingNum !== expectedNum) {
+      return {
+        success: false,
+        code: 'SEQUENCE_ERROR',
+        message: progress.lastSerial
+          ? `Expected next serial ${expectedNum}, received ${incomingNum}`
+          : `Expected first serial ${expectedNum}, received ${incomingNum}`,
+      };
     }
 
     await ProductionEntry.create({ date, model, serial, timestamp });
 
-    const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
     if (range) {
-      const scanned = await ProductionEntry.countDocuments({ date, model });
-      range.scanned = scanned;
-      range.missing = Math.max(0, (range.expected || 0) - scanned);
-      await range.save();
+      const { scanned } = await getSerialProgress(date, model, range);
+      range.row.scanned = scanned;
+      range.row.missing = Math.max(0, range.expected - scanned);
+      await range.row.save();
     }
 
     return { success: true };
