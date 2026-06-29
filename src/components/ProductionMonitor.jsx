@@ -9,8 +9,15 @@ Chart.register(...registerables);
 if (typeof window !== "undefined") window.Chart = Chart;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-// FIX 1: API_BASE was missing its fallback value — fixed
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3000";
+// Use same-origin API on Vercel so preview/production aliases do not hit CORS.
+const getApiBase = () => {
+  const envBase = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+  if (typeof window !== "undefined" && window.location.hostname.endsWith(".vercel.app")) {
+    return `${window.location.origin}/api`;
+  }
+  return envBase || "http://localhost:3000/api";
+};
+const API_BASE = getApiBase();
 
 // ─── apiFetch — single source of truth for all HTTP calls ────────────────────
 const apiFetch = async (method, path, body) => {
