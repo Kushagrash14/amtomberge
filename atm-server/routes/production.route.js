@@ -7,7 +7,7 @@ import {
   getModels, saveModel, deleteModel,
   getSerialRanges, setSerialRange,
   getManpower, setManpower,
-  getUsers, addUser,
+  getUsers, addUser, updateUser, deleteUser,
   verifyAdmin,
 } from '../controllers/production.controller.js';
 
@@ -46,6 +46,9 @@ router.post('/manpower',     setManpower);
 // Users (admin)
 router.get('/users',         getUsers);
 router.post('/users',        addUser);
+router.put('/users',         updateUser);
+router.delete('/users',      deleteUser);
+router.delete('/users/:email', deleteUser);
 
 // Admin auth
 router.post('/admin/verify', verifyAdmin);

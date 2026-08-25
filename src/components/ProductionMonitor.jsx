@@ -92,6 +92,10 @@ const callServer = async (action, payload = {}) => {
 
     case "serverAddUser":
       return apiFetch("POST", "/users", { email: payload.email, name: payload.name, role: payload.role });
+    case "serverUpdateUser":
+      return apiFetch("PUT", "/users", { email: payload.email, name: payload.name, role: payload.role });
+    case "serverDeleteUser":
+      return apiFetch("DELETE", "/users", { email: payload.email });
 
     default:
       console.warn("callServer: unknown action", action);
@@ -677,6 +681,8 @@ function ProductionMonitor({ onLogout }) {
   const [targets,      setTargets]      = useState(DEF_TARGETS.slice());
   const [uEmail,    setUEmail]    = useState("");
   const [uName,     setUName]     = useState("");
+  const [uRole,     setURole]     = useState("user");
+  const [editingUser, setEditingUser] = useState(null);
   const [usersList, setUsersList] = useState([]);
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
@@ -1270,15 +1276,51 @@ function ProductionMonitor({ onLogout }) {
     alert("✅ Settings saved!");
   }, [idleThrInput, saveSetting]);
 
-  const addUser = useCallback(() => {
+  const handleSaveUser = useCallback(() => {
     if (!uEmail || !uName) { alert("Enter both email and name."); return; }
-    callServer("serverAddUser", { action:"addUser", email:uEmail, name:uName })
+    const isEdit = !!editingUser;
+    const action = isEdit ? "serverUpdateUser" : "serverAddUser";
+    callServer(action, { email: uEmail, name: uName, role: uRole })
       .then(res => {
-        if (res.success === false) { alert(res.message || "Error adding user."); return; }
-        alert("✅ User added: " + uName); setUEmail(""); setUName(""); loadUsersList();
+        if (res.success === false) { alert(res.message || "Error saving user."); return; }
+        alert(isEdit ? `✅ User updated: ${uName}` : `✅ User added: ${uName}`);
+        setUEmail("");
+        setUName("");
+        setURole("user");
+        setEditingUser(null);
+        loadUsersList();
       })
       .catch(e => alert("Error: " + (e.message || e)));
-  }, [uEmail, uName]);
+  }, [uEmail, uName, uRole, editingUser, loadUsersList]);
+
+  const handleEditUserClick = useCallback((userRow) => {
+    setUEmail(userRow[0] || "");
+    setUName(userRow[1] || "");
+    setURole(userRow[2] || "user");
+    setEditingUser(userRow[0] || "");
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setUEmail("");
+    setUName("");
+    setURole("user");
+    setEditingUser(null);
+  }, []);
+
+  const handleDeleteUserClick = useCallback((email, name) => {
+    if (!email) return;
+    if (!confirm(`Are you sure you want to delete user "${name || email}" (${email})?`)) return;
+    callServer("serverDeleteUser", { email })
+      .then(res => {
+        if (res.success === false) { alert(res.message || "Error deleting user."); return; }
+        alert(`✅ User deleted: ${email}`);
+        if (editingUser === email) {
+          handleCancelEdit();
+        }
+        loadUsersList();
+      })
+      .catch(e => alert("Error: " + (e.message || e)));
+  }, [editingUser, handleCancelEdit, loadUsersList]);
 
   const loadUsersList = useCallback(() => {
     getSheet("AuthUsers").then(data => {
@@ -1454,12 +1496,16 @@ function ProductionMonitor({ onLogout }) {
         </div>
 
         {(() => {
+          const session = loadSession();
+          const userRole = (session?.role || "user").toLowerCase();
+          const isPlantHead = userRole === "plant_head";
+
           const tabs = [
             { id:"dashboard", label:"📊 Dashboard", show:true },
-            { id:"scanning",  label:"🔍 Scanning",  show:true },
+            { id:"scanning",  label:"🔍 Scanning",  show:!isPlantHead },
             { id:"reports",   label:"📋 Reports",   show:true },
             { id:"charts",    label:"📈 Charts",    show:true },
-            { id:"settings",  label:"⚙️ Settings",  show:true },
+            { id:"settings",  label:"⚙️ Settings",  show:!isPlantHead },
           ];
           return (
             <div className="pg-tabs" style={{justifyContent:"space-between",alignItems:"center",paddingRight:10}}>
@@ -1469,7 +1515,7 @@ function ProductionMonitor({ onLogout }) {
                     {t.label}
                   </button>
                 ))}
-                {adminUnlocked && (
+                {adminUnlocked && !isPlantHead && (
                   <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
                 )}
               </div>
@@ -1550,13 +1596,19 @@ function ProductionMonitor({ onLogout }) {
         )}
         {activeTab==="admin" && adminUnlocked && (
           <AdminTab
-            S={S} targets={targets} setTargets={setTargets}
+            targets={targets} setTargets={setTargets}
             idleThrInput={idleThrInput} setIdleThrInput={setIdleThrInput}
             saveTargets={saveTargets} defaultTargets={()=>setTargets(DEF_TARGETS.slice())}
             saveSettings={saveSettings}
             uEmail={uEmail} setUEmail={setUEmail}
             uName={uName} setUName={setUName}
-            addUser={addUser} usersList={usersList}
+            uRole={uRole} setURole={setURole}
+            editingUser={editingUser}
+            handleSaveUser={handleSaveUser}
+            handleCancelEdit={handleCancelEdit}
+            handleEditUserClick={handleEditUserClick}
+            handleDeleteUserClick={handleDeleteUserClick}
+            usersList={usersList}
           />
         )}
       </div>
@@ -3060,7 +3112,15 @@ function SettingsTab({ S, sRange, rngDisp, rngModel, setRngModel, rngStart, setR
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function AdminTab({ S, targets, setTargets, idleThrInput, setIdleThrInput, saveTargets, defaultTargets, saveSettings, uEmail, setUEmail, uName, setUName, addUser, usersList }) {
+function AdminTab({
+  targets, setTargets,
+  idleThrInput, setIdleThrInput,
+  saveTargets, defaultTargets, saveSettings,
+  uEmail, setUEmail, uName, setUName, uRole, setURole,
+  editingUser, handleSaveUser, handleCancelEdit,
+  handleEditUserClick, handleDeleteUserClick,
+  usersList
+}) {
   return (
     <div className="tab-pane">
       <div className="section">
@@ -3089,20 +3149,120 @@ function AdminTab({ S, targets, setTargets, idleThrInput, setIdleThrInput, saveT
         <button className="btn btn-navy" onClick={saveSettings}>Save Settings</button>
       </div>
       <div className="section">
-        <div className="sec-title">User Management</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end",marginBottom:12}}>
-          <div className="fg" style={{margin:0}}><label className="fl">Email</label><input type="email" className="fi" placeholder="user@company.com" value={uEmail} onChange={e=>setUEmail(e.target.value)}/></div>
-          <div className="fg" style={{margin:0}}><label className="fl">Full Name</label><input type="text" className="fi" placeholder="Full name" value={uName} onChange={e=>setUName(e.target.value)}/></div>
-          <button className="btn btn-grn" onClick={addUser}>+ Add</button>
+        <div className="sec-title" style={{display:"flex",alignItems:"center",gap:8}}>
+          User Management
+          {editingUser && <span style={{fontSize:11,background:"#fef3c7",color:"#92400e",padding:"2px 8px",borderRadius:6,border:"1px solid #fde68a"}}>✏️ Editing: {editingUser}</span>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.2fr auto",gap:8,alignItems:"end",marginBottom:12}}>
+          <div className="fg" style={{margin:0}}>
+            <label className="fl">Email</label>
+            <input
+              type="email"
+              className="fi"
+              placeholder="user@company.com"
+              value={uEmail}
+              onChange={e=>setUEmail(e.target.value)}
+              disabled={!!editingUser}
+              style={{fontWeight:600}}
+            />
+          </div>
+          <div className="fg" style={{margin:0}}>
+            <label className="fl">Full Name</label>
+            <input
+              type="text"
+              className="fi"
+              placeholder="Full name"
+              value={uName}
+              onChange={e=>setUName(e.target.value)}
+              style={{fontWeight:600}}
+            />
+          </div>
+          <div className="fg" style={{margin:0}}>
+            <label className="fl">Role & Access Level</label>
+            <select
+              className="fs"
+              value={uRole}
+              onChange={e=>setURole(e.target.value)}
+              style={{fontWeight:600}}
+            >
+              <option value="superadmin">👑 Super Admin (Full Access)</option>
+              <option value="plant_head">🏭 Plant Head (Dashboard, Reports & Charts only)</option>
+              <option value="user">👤 User / Operator (Standard Access)</option>
+            </select>
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            <button
+              className={`btn ${editingUser ? "btn-amb" : "btn-grn"}`}
+              onClick={handleSaveUser}
+              style={{whiteSpace:"nowrap",padding:"7px 12px"}}
+            >
+              {editingUser ? "💾 Update" : "+ Add"}
+            </button>
+            {editingUser && (
+              <button
+                className="btn btn-navy"
+                onClick={handleCancelEdit}
+                style={{whiteSpace:"nowrap",padding:"7px 10px"}}
+                title="Cancel edit"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
         {usersList.length > 0 && (
           <div className="tbl-wrap">
             <table>
-              <thead><tr><th>Email</th><th>Name</th><th>Role</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th style={{textAlign:"center",width:130}}>Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {usersList.map((r,i)=>(
-                  <tr key={i}><td>{r[0]||""}</td><td>{r[1]||""}</td><td>{r[2]||"operator"}</td></tr>
-                ))}
+                {usersList.map((r,i)=>{
+                  const email = r[0] || "";
+                  const name = r[1] || "";
+                  const role = (r[2] || "user").toLowerCase();
+                  const roleBadge = role === "superadmin"
+                    ? { bg: "#ede9fe", color: "#6d28d9", border: "#c4b5fd", label: "👑 Super Admin" }
+                    : role === "plant_head"
+                    ? { bg: "#fef3c7", color: "#b45309", border: "#fde68a", label: "🏭 Plant Head" }
+                    : { bg: "#e0f2fe", color: "#0369a1", border: "#bae6fd", label: "👤 User / Operator" };
+                  return (
+                    <tr key={i}>
+                      <td><strong>{email}</strong></td>
+                      <td>{name}</td>
+                      <td>
+                        <span style={{background:roleBadge.bg,color:roleBadge.color,border:`1px solid ${roleBadge.border}`,padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700}}>
+                          {roleBadge.label}
+                        </span>
+                      </td>
+                      <td style={{textAlign:"center"}}>
+                        <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                          <button
+                            className="btn btn-navy"
+                            style={{padding:"3px 8px",fontSize:11}}
+                            onClick={()=>handleEditUserClick(r)}
+                            title="Edit User"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            className="btn btn-dngr"
+                            style={{padding:"3px 8px",fontSize:11}}
+                            onClick={()=>handleDeleteUserClick(email, name)}
+                            title="Delete User"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

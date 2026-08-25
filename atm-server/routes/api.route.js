@@ -332,6 +332,34 @@ const handlers = {
     return { success: true };
   },
 
+  async serverUpdateUser(body) {
+    const email = normalizeEmail(body.email);
+    if (!email) return { success: false, message: 'Email is required' };
+
+    const user = await userModel.findOne({ email });
+    if (!user) return { success: false, message: 'User not found' };
+
+    if (body.name || body.username) {
+      const uname = String(body.name || body.username).trim();
+      user.name = uname;
+      user.username = uname;
+    }
+    if (body.role) {
+      user.role = String(body.role).trim();
+    }
+    await user.save();
+    return { success: true };
+  },
+
+  async serverDeleteUser(body) {
+    const email = normalizeEmail(body.email);
+    if (!email) return { success: false, message: 'Email is required' };
+
+    const result = await userModel.deleteOne({ email });
+    if (result.deletedCount === 0) return { success: false, message: 'User not found' };
+    return { success: true };
+  },
+
   async serverLogout() {
     return { success: true };
   },

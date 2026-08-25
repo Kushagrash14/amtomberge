@@ -402,6 +402,37 @@ export const addUser = async (req, res) => {
   }
 };
 
+// PUT /api/production/users
+// body: { email, name, role }
+export const updateUser = async (req, res) => {
+  try {
+    const { email, name, role } = req.body;
+    if (!email) return err(res, 'email is required');
+    const user = await userModel.findOne({ email: email.trim().toLowerCase() });
+    if (!user) return err(res, 'User not found', 404);
+    if (name) { user.name = name.trim(); user.username = name.trim(); }
+    if (role) { user.role = role.trim(); }
+    await user.save();
+    ok(res, { message: 'User updated' });
+  } catch {
+    err(res, 'Failed to update user', 500);
+  }
+};
+
+// DELETE /api/production/users
+// body: { email } or req.params.email
+export const deleteUser = async (req, res) => {
+  try {
+    const email = (req.body?.email || req.params?.email || '').trim().toLowerCase();
+    if (!email) return err(res, 'email is required');
+    const result = await userModel.deleteOne({ email });
+    if (result.deletedCount === 0) return err(res, 'User not found', 404);
+    ok(res, { message: 'User deleted' });
+  } catch {
+    err(res, 'Failed to delete user', 500);
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN AUTH
 // ═══════════════════════════════════════════════════════════════════════════════
