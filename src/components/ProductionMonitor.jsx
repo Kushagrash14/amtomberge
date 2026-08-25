@@ -1276,6 +1276,20 @@ function ProductionMonitor({ onLogout }) {
     alert("✅ Settings saved!");
   }, [idleThrInput, saveSetting]);
 
+  const loadUsersList = useCallback(() => {
+    getSheet("AuthUsers").then(data => {
+      if (!data.data || data.data.length <= 1) { setUsersList([]); return; }
+      setUsersList(data.data.slice(1));
+    }).catch(() => setUsersList([]));
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setUEmail("");
+    setUName("");
+    setURole("user");
+    setEditingUser(null);
+  }, []);
+
   const handleSaveUser = useCallback(() => {
     if (!uEmail || !uName) { alert("Enter both email and name."); return; }
     const isEdit = !!editingUser;
@@ -1300,13 +1314,6 @@ function ProductionMonitor({ onLogout }) {
     setEditingUser(userRow[0] || "");
   }, []);
 
-  const handleCancelEdit = useCallback(() => {
-    setUEmail("");
-    setUName("");
-    setURole("user");
-    setEditingUser(null);
-  }, []);
-
   const handleDeleteUserClick = useCallback((email, name) => {
     if (!email) return;
     if (!confirm(`Are you sure you want to delete user "${name || email}" (${email})?`)) return;
@@ -1321,13 +1328,6 @@ function ProductionMonitor({ onLogout }) {
       })
       .catch(e => alert("Error: " + (e.message || e)));
   }, [editingUser, handleCancelEdit, loadUsersList]);
-
-  const loadUsersList = useCallback(() => {
-    getSheet("AuthUsers").then(data => {
-      if (!data.data || data.data.length <= 1) { setUsersList([]); return; }
-      setUsersList(data.data.slice(1));
-    }).catch(() => setUsersList([]));
-  }, []);
 
   const newDayReset = () => {
     if (!confirm("⚠️ RESET FOR NEW DAY?\n\nDashboard will clear.\nAll database data is safe.\n\nContinue?")) return;
