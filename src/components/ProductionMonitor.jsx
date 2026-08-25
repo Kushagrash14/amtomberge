@@ -1758,9 +1758,18 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
   const [loadedData, setLoadedData] = useState(null);
   const [loadError, setLoadError] = useState("");
 
+  // Modal State for Excel Export
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportStart, setExportStart] = useState(liveS?.date || todayStr());
+  const [exportEnd, setExportEnd] = useState(liveS?.date || todayStr());
+  const [exportType, setExportType] = useState("full");
+  const [exportSlot, setExportSlot] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
+
   const isToday = reportDate === (liveS?.date || todayStr());
 
-  // Function to load data for selected date
+  // Function to load data for selected date in view
   const loadDateData = useCallback(async (targetDate) => {
     setIsLoading(true);
     setLoadError("");
@@ -1877,12 +1886,12 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     }
   }, [reportDate, isToday, loadDateData]);
 
-  // Active dataset
+  // Active dataset for current view
   const activeS = (!isToday && loadedData) ? loadedData : (liveS || {});
   const activeMP = (!isToday && loadedData) ? (loadedData.manpower || 0) : (liveManpower || 0);
   const activeSR = (!isToday && loadedData) ? loadedData.sRange : (liveSRange || {});
 
-  // Filtered Serials
+  // Filtered Serials for current view
   const allSerials = activeS?.serials || [];
   const filteredSerials = useMemo(() => {
     return allSerials.filter(s => {
@@ -1898,7 +1907,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     });
   }, [allSerials, selectedSlot, searchTerm]);
 
-  // Filtered Idles
+  // Filtered Idles for current view
   const allIdles = activeS?.idles || [];
   const filteredIdles = useMemo(() => {
     return allIdles.filter(r => {
@@ -1911,7 +1920,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     });
   }, [allIdles, selectedSlot, searchTerm]);
 
-  // Filtered Reloads
+  // Filtered Reloads for current view
   const allReloads = activeS?.reloads || [];
   const filteredReloads = useMemo(() => {
     return allReloads.filter(r => {
@@ -1924,7 +1933,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     });
   }, [allReloads, selectedSlot, searchTerm]);
 
-  // Hourly stats & calculations
+  // Hourly stats & calculations for current view
   const hourlyData = activeS?.hourly || [];
   const slotStats = useMemo(() => {
     if (selectedSlot) {
@@ -1957,7 +1966,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     }
   }, [selectedSlot, hourlyData, activeS, allSerials, allIdles, allReloads]);
 
-  // Missing Serials calculation
+  // Missing Serials calculation for current view
   const missingSerialsList = useMemo(() => {
     if (!activeSR?.model || !activeSR.start || !activeSR.end) return [];
     const scannedSet = new Set();
@@ -1977,127 +1986,334 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     return missing;
   }, [activeSR, allSerials]);
 
-  // Excel / CSV Export function
-  const exportToExcel = (mode = "active") => {
-    const dStr = reportDate || todayStr();
-    const sStr = selectedSlot ? selectedSlot.replace(/:/g, "-") : "AllDay";
-
-    if (mode === "full") {
-      const rows = [
-        ["PG GROUP / ATOMBERG PRODUCTION REPORT - FULL SUMMARY"],
-        ["Date", dStr],
-        ["Generated At", new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST"],
-        ["Total Production", activeS?.totalProd || allSerials.length],
-        ["Total Target", hourlyData.reduce((a, h) => a + (h.target || 0), 0)],
-        ["Manpower", activeMP],
-        ["Total Idle Time (min)", allIdles.reduce((a, h) => a + (h.duration || 0), 0)],
-        ["Total Reloads", allReloads.reduce((a, r) => a + (r.count || 1), 0)],
-        [],
-        ["--- HOURLY BREAKDOWN ---"],
-        ["Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Department", "Reason", "Reloads"],
-        ...hourlyData.map(h => {
-          const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
-          return [h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.dept || "-", h.reason || "-", h.reloads || 0];
-        }),
-        [],
-        ["--- SCANNED SERIAL NUMBERS (" + allSerials.length + " Total) ---"],
-        ["#", "Serial Number", "Model", "Timestamp", "Slot"],
-        ...allSerials.map((s, idx) => {
-          const sIdx = tsToSlot(s.ts);
-          return [idx + 1, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
-        }),
-        [],
-        ["--- IDLE TIME RECORDS (" + allIdles.length + " Total) ---"],
-        ["#", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
-        ...allIdles.map((r, idx) => [idx + 1, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
-        [],
-        ["--- RELOADS RECORDS (" + allReloads.length + " Total) ---"],
-        ["#", "Slot", "Type", "Count", "Timestamp"],
-        ...allReloads.map((r, idx) => [idx + 1, r.slot, r.type, r.count, r.ts || "-"]),
-      ];
-      dlExcelCSV(`Production_Full_Report_${dStr}.csv`, rows);
-      return;
+  // Helper to generate dates list
+  const getDatesList = (startStr, endStr) => {
+    const dates = [];
+    try {
+      const s = new Date(startStr);
+      const e = new Date(endStr);
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) return [startStr || todayStr()];
+      let curr = new Date(s.getTime());
+      let safety = 0;
+      while (curr <= e && safety < 120) {
+        dates.push(new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
+        }).format(curr));
+        curr.setDate(curr.getDate() + 1);
+        safety++;
+      }
+    } catch (e) {
+      return [startStr || todayStr()];
     }
+    return dates.length ? dates : [startStr || todayStr()];
+  };
 
-    if (activeReport === "daily") {
-      const rows = [
-        ["PG GROUP - DAILY PRODUCTION SUMMARY"],
-        ["Date", dStr],
-        ["Time Filter", selectedSlot || "All Day (07:00-19:00)"],
-        ["Total Production", slotStats.prod],
-        ["Target", slotStats.target],
-        ["Achievement %", slotStats.ach + "%"],
-        ["Manpower", activeMP],
-        ["Idle Time (min)", slotStats.idle],
-        ["Reloads", slotStats.reloads],
-        [],
-        ["Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Department", "Reason", "Reloads"],
-        ...hourlyData
-          .filter(h => !selectedSlot || h.slot === selectedSlot)
-          .map(h => {
-            const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
-            return [h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.dept || "-", h.reason || "-", h.reloads || 0];
-          }),
-      ];
-      dlExcelCSV(`Daily_Summary_${dStr}_${sStr}.csv`, rows);
-    } else if (activeReport === "serials") {
-      const rows = [
-        ["PG GROUP - SERIAL NUMBERS REPORT"],
-        ["Date", dStr],
-        ["Time Filter", selectedSlot || "All Day"],
-        ["Total Serials", filteredSerials.length],
-        [],
-        ["#", "Serial Number", "Model", "Timestamp", "Slot", "Date"],
-        ...filteredSerials.map((s, idx) => {
-          const sIdx = tsToSlot(s.ts);
-          return [idx + 1, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-", dStr];
-        }),
-      ];
-      dlExcelCSV(`Serials_Report_${dStr}_${sStr}.csv`, rows);
-    } else if (activeReport === "idle") {
-      const rows = [
-        ["PG GROUP - IDLE TIME ANALYSIS REPORT"],
-        ["Date", dStr],
-        ["Time Filter", selectedSlot || "All Day"],
-        ["Total Incidents", filteredIdles.length],
-        [],
-        ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
-        ...filteredIdles.map((r, idx) => [idx + 1, dStr, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
-      ];
-      dlExcelCSV(`Idle_Analysis_${dStr}_${sStr}.csv`, rows);
-    } else if (activeReport === "missing") {
-      const rows = [
-        ["PG GROUP - MISSING SERIALS REPORT"],
-        ["Date", dStr],
-        ["Model", activeSR?.model || "N/A"],
-        ["Range", activeSR?.start ? `${activeSR.start} - ${activeSR.end}` : "N/A"],
-        ["Total Missing", missingSerialsList.length],
-        [],
-        ["#", "Model", "Missing Serial Number", "Date"],
-        ...missingSerialsList.map((m, idx) => [idx + 1, m.model, m.serial, dStr]),
-      ];
-      dlExcelCSV(`Missing_Serials_${dStr}.csv`, rows);
-    } else if (activeReport === "reloads") {
-      const rows = [
-        ["PG GROUP - RELOADS REPORT"],
-        ["Date", dStr],
-        ["Time Filter", selectedSlot || "All Day"],
-        ["Total Records", filteredReloads.length],
-        [],
-        ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
-        ...filteredReloads.map((r, idx) => [idx + 1, dStr, r.slot, r.type, r.count, r.ts || "-"]),
-      ];
-      dlExcelCSV(`Reloads_Report_${dStr}_${sStr}.csv`, rows);
+  // Quick Preset Helper for Export Modal
+  const applyPreset = (preset) => {
+    const today = todayStr();
+    if (preset === "today") {
+      setExportStart(today);
+      setExportEnd(today);
+    } else if (preset === "yesterday") {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      const yStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+      setExportStart(yStr);
+      setExportEnd(yStr);
+    } else if (preset === "7days") {
+      const d = new Date();
+      d.setDate(d.getDate() - 6);
+      const sStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+      setExportStart(sStr);
+      setExportEnd(today);
+    } else if (preset === "30days") {
+      const d = new Date();
+      d.setDate(d.getDate() - 29);
+      const sStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+      setExportStart(sStr);
+      setExportEnd(today);
+    } else if (preset === "thisMonth") {
+      const d = new Date();
+      const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+      const sStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(firstDay);
+      setExportStart(sStr);
+      setExportEnd(today);
     }
   };
 
-  const activeReportLabel = {
-    daily: "Daily Summary",
-    serials: `Serials (${filteredSerials.length})`,
-    idle: `Idle Time (${filteredIdles.length})`,
-    missing: `Missing (${missingSerialsList.length})`,
-    reloads: `Reloads (${filteredReloads.length})`,
-  }[activeReport] || "Report";
+  // Excel / CSV Export with Date Range support
+  const handleDownloadExcel = async () => {
+    let sDate = exportStart || todayStr();
+    let eDate = exportEnd || todayStr();
+    if (sDate > eDate) {
+      const tmp = sDate; sDate = eDate; eDate = tmp;
+    }
+    const dates = getDatesList(sDate, eDate);
+    setIsExporting(true);
+    setExportProgress(`Fetching data for ${dates.length} day(s)...`);
+
+    try {
+      const allDaysData = [];
+
+      for (let i = 0; i < dates.length; i++) {
+        const d = dates[i];
+        setExportProgress(`Loading ${d} (${i + 1}/${dates.length})...`);
+
+        const [prodRes, idleRes, rldRes, rngRes, mpRes] = await Promise.all([
+          apiFetch("GET", `/data?date=${encodeURIComponent(d)}`),
+          apiFetch("GET", `/idle?date=${encodeURIComponent(d)}`),
+          apiFetch("GET", `/reloads?date=${encodeURIComponent(d)}`),
+          apiFetch("GET", `/ranges?date=${encodeURIComponent(d)}`),
+          apiFetch("GET", `/manpower?date=${encodeURIComponent(d)}`),
+        ]);
+
+        const serials = [];
+        if (prodRes?.data && prodRes.data.length > 1) {
+          for (let j = 1; j < prodRes.data.length; j++) {
+            const r = prodRes.data[j];
+            const ser = String(r[3] || "").trim();
+            if (ser && !serials.find(x => x.serial === ser)) {
+              serials.push({ serial: ser, model: String(r[2] || "").trim(), ts: String(r[0] || "").trim(), date: d });
+            }
+          }
+        }
+
+        const idles = [];
+        if (idleRes?.data && idleRes.data.length > 1) {
+          for (let j = 1; j < idleRes.data.length; j++) {
+            const r = idleRes.data[j];
+            const slot = normSlot(String(r[6] || "").trim());
+            idles.push({
+              date: d,
+              from: String(r[1] || "").trim(),
+              to: String(r[2] || "").trim(),
+              duration: parseFloat(r[3]) || 0,
+              dept: String(r[4] || "").trim(),
+              reason: String(r[5] || "").trim(),
+              slot,
+            });
+          }
+        }
+
+        const reloads = [];
+        if (rldRes?.data && rldRes.data.length > 1) {
+          for (let j = 1; j < rldRes.data.length; j++) {
+            const r = rldRes.data[j];
+            const slot = normSlot(String(r[1] || "").trim());
+            reloads.push({
+              date: d,
+              slot,
+              type: String(r[2] || "").trim(),
+              count: parseInt(r[3]) || 1,
+              ts: String(r[4] || "").trim(),
+            });
+          }
+        }
+
+        const targets = appSettings?.targets || DEF_TARGETS;
+        const hourly = SLOTS.map((slotName, slotIdx) => ({
+          slot: slotName,
+          prod: 0,
+          target: targets[slotIdx] !== undefined ? targets[slotIdx] : DEF_TARGETS[slotIdx],
+          idle: 0,
+          reloads: 0,
+        }));
+
+        serials.forEach(s => {
+          const sIdx = tsToSlot(s.ts);
+          if (sIdx >= 0 && sIdx < 12) hourly[sIdx].prod++;
+        });
+        idles.forEach(r => {
+          const sIdx = SLOTS.indexOf(r.slot);
+          if (sIdx >= 0) hourly[sIdx].idle += (parseFloat(r.duration) || 0);
+        });
+        reloads.forEach(r => {
+          const sIdx = SLOTS.indexOf(r.slot);
+          if (sIdx >= 0) hourly[sIdx].reloads += (parseInt(r.count) || 1);
+        });
+
+        let sr = null;
+        if (rngRes?.data && rngRes.data.length > 1) {
+          const r = rngRes.data[1];
+          sr = { model: String(r[1] || ""), start: parseInt(r[2]) || 0, end: parseInt(r[3]) || 0, date: d };
+        }
+
+        const mp = mpRes?.manpower || 0;
+
+        allDaysData.push({
+          date: d,
+          serials,
+          idles,
+          reloads,
+          hourly,
+          sRange: sr,
+          manpower: mp,
+        });
+      }
+
+      setExportProgress("Generating Excel file...");
+
+      // Filter by slot if requested
+      const slotFilter = exportSlot;
+      const isSingleDay = sDate === eDate;
+      const dateRangeLabel = isSingleDay ? sDate : `${sDate}_to_${eDate}`;
+
+      if (exportType === "full") {
+        const allSerialsList = allDaysData.flatMap(day => day.serials);
+        const allIdlesList = allDaysData.flatMap(day => day.idles);
+        const allReloadsList = allDaysData.flatMap(day => day.reloads);
+
+        const rows = [
+          ["PG GROUP / ATOMBERG PRODUCTION REPORT - COMPREHENSIVE EXCEL EXPORT"],
+          ["Date Range", `From: ${sDate} To: ${eDate} (${dates.length} Days)`],
+          ["Time Slot Filter", slotFilter || "All Day (07:00-19:00)"],
+          ["Generated At", new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST"],
+          ["Total Production Scans", allSerialsList.length],
+          ["Total Idle Incidents", allIdlesList.length],
+          ["Total Reloads", allReloadsList.length],
+          [],
+          ["========================================================================="],
+          ["1. DAILY & HOURLY PRODUCTION SUMMARY"],
+          ["========================================================================="],
+          ["Date", "Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Reloads", "Manpower"],
+          ...allDaysData.flatMap(day =>
+            day.hourly
+              .filter(h => !slotFilter || h.slot === slotFilter)
+              .map(h => {
+                const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+                return [day.date, h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.reloads || 0, day.manpower || 0];
+              })
+          ),
+          [],
+          ["========================================================================="],
+          ["2. ALL SCANNED SERIAL NUMBERS (" + allSerialsList.length + " Total)"],
+          ["========================================================================="],
+          ["#", "Date", "Serial Number", "Model", "Timestamp", "Time Slot"],
+          ...allSerialsList
+            .filter(s => {
+              if (!slotFilter) return true;
+              const sIdx = tsToSlot(s.ts);
+              return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
+            })
+            .map((s, idx) => {
+              const sIdx = tsToSlot(s.ts);
+              return [idx + 1, s.date, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
+            }),
+          [],
+          ["========================================================================="],
+          ["3. IDLE TIME RECORDS (" + allIdlesList.length + " Total)"],
+          ["========================================================================="],
+          ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
+          ...allIdlesList
+            .filter(r => !slotFilter || r.slot === slotFilter)
+            .map((r, idx) => [idx + 1, r.date, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
+          [],
+          ["========================================================================="],
+          ["4. RELOADS RECORDS (" + allReloadsList.length + " Total)"],
+          ["========================================================================="],
+          ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
+          ...allReloadsList
+            .filter(r => !slotFilter || r.slot === slotFilter)
+            .map((r, idx) => [idx + 1, r.date, r.slot, r.type, r.count, r.ts || "-"]),
+        ];
+
+        dlExcelCSV(`Atomberg_Full_Report_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "daily") {
+        const rows = [
+          ["PG GROUP - DAILY PRODUCTION SUMMARY"],
+          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["Time Filter", slotFilter || "All Day (07:00-19:00)"],
+          [],
+          ["Date", "Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Reloads", "Manpower"],
+          ...allDaysData.flatMap(day =>
+            day.hourly
+              .filter(h => !slotFilter || h.slot === slotFilter)
+              .map(h => {
+                const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+                return [day.date, h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.reloads || 0, day.manpower || 0];
+              })
+          ),
+        ];
+        dlExcelCSV(`Atomberg_Daily_Summary_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "serials") {
+        const allSerialsList = allDaysData.flatMap(day => day.serials).filter(s => {
+          if (!slotFilter) return true;
+          const sIdx = tsToSlot(s.ts);
+          return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
+        });
+        const rows = [
+          ["PG GROUP - SERIAL NUMBERS REPORT"],
+          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["Time Filter", slotFilter || "All Day"],
+          ["Total Serials", allSerialsList.length],
+          [],
+          ["#", "Date", "Serial Number", "Model", "Timestamp", "Time Slot"],
+          ...allSerialsList.map((s, idx) => {
+            const sIdx = tsToSlot(s.ts);
+            return [idx + 1, s.date, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
+          }),
+        ];
+        dlExcelCSV(`Atomberg_Serials_Report_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "idle") {
+        const allIdlesList = allDaysData.flatMap(day => day.idles).filter(r => !slotFilter || r.slot === slotFilter);
+        const rows = [
+          ["PG GROUP - IDLE TIME ANALYSIS REPORT"],
+          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["Time Filter", slotFilter || "All Day"],
+          ["Total Incidents", allIdlesList.length],
+          [],
+          ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
+          ...allIdlesList.map((r, idx) => [idx + 1, r.date, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
+        ];
+        dlExcelCSV(`Atomberg_Idle_Report_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "missing") {
+        const missingList = [];
+        allDaysData.forEach(day => {
+          if (!day.sRange?.model || !day.sRange.start || !day.sRange.end) return;
+          const scannedSet = new Set();
+          day.serials.forEach(s => {
+            if (s.model !== day.sRange.model) return;
+            const n = extractNum(s.serial);
+            if (n !== null && n >= day.sRange.start && n <= day.sRange.end) scannedSet.add(n);
+          });
+          for (let i = day.sRange.start; i <= day.sRange.end; i++) {
+            if (!scannedSet.has(i)) {
+              missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i) });
+            }
+          }
+        });
+        const rows = [
+          ["PG GROUP - MISSING SERIALS REPORT"],
+          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["Total Missing Serials", missingList.length],
+          [],
+          ["#", "Date", "Model", "Missing Serial Number"],
+          ...missingList.map((m, idx) => [idx + 1, m.date, m.model, m.serial]),
+        ];
+        dlExcelCSV(`Atomberg_Missing_Serials_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "reloads") {
+        const allReloadsList = allDaysData.flatMap(day => day.reloads).filter(r => !slotFilter || r.slot === slotFilter);
+        const rows = [
+          ["PG GROUP - RELOADS REPORT"],
+          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["Time Filter", slotFilter || "All Day"],
+          ["Total Records", allReloadsList.length],
+          [],
+          ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
+          ...allReloadsList.map((r, idx) => [idx + 1, r.date, r.slot, r.type, r.count, r.ts || "-"]),
+        ];
+        dlExcelCSV(`Atomberg_Reloads_Report_${dateRangeLabel}.csv`, rows);
+      }
+
+      setShowExportModal(false);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Export failed: " + (err.message || err));
+    } finally {
+      setIsExporting(false);
+      setExportProgress("");
+    }
+  };
 
   return (
     <div className="tab-pane">
@@ -2114,20 +2330,20 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
             </span>
           )}
         </div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <div>
           <button
             className="btn btn-export"
-            onClick={() => exportToExcel("active")}
-            title="Download currently active report view to Excel"
+            onClick={() => {
+              setExportStart(reportDate || todayStr());
+              setExportEnd(reportDate || todayStr());
+              setExportType(activeReport === "daily" ? "full" : activeReport);
+              setExportSlot(selectedSlot || "");
+              setShowExportModal(true);
+            }}
+            style={{padding:"8px 16px",fontSize:12,gap:6}}
+            title="Download Excel Report with custom date range"
           >
-            📥 Download Excel ({activeReportLabel})
-          </button>
-          <button
-            className="btn btn-navy"
-            onClick={() => exportToExcel("full")}
-            title="Download complete multi-section report to Excel"
-          >
-            📦 Download Full Day Excel
+            📥 Download Excel Report
           </button>
         </div>
       </div>
@@ -2503,6 +2719,130 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
             </div>
           )}
         </>
+      )}
+
+      {/* Excel Download Modal with Date Range Selector */}
+      {showExportModal && (
+        <div className="modal-overlay" onClick={() => !isExporting && setShowExportModal(false)}>
+          <div className="m-box" style={{maxWidth:480,width:"92%"}} onClick={e => e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div className="m-title" style={{margin:0,display:"flex",alignItems:"center",gap:6,fontSize:16}}>
+                📥 Export Report to Excel
+              </div>
+              <button
+                className="del-btn"
+                style={{width:24,height:24,borderRadius:"50%",fontSize:12}}
+                onClick={() => !isExporting && setShowExportModal(false)}
+                disabled={isExporting}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="fg">
+              <label className="fl">⚡ Quick Presets:</label>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                <button type="button" className="btn btn-navy" style={{padding:"4px 9px",fontSize:10}} onClick={() => applyPreset("today")}>Today</button>
+                <button type="button" className="btn btn-navy" style={{padding:"4px 9px",fontSize:10}} onClick={() => applyPreset("yesterday")}>Yesterday</button>
+                <button type="button" className="btn btn-navy" style={{padding:"4px 9px",fontSize:10}} onClick={() => applyPreset("7days")}>Last 7 Days</button>
+                <button type="button" className="btn btn-navy" style={{padding:"4px 9px",fontSize:10}} onClick={() => applyPreset("30days")}>Last 30 Days</button>
+                <button type="button" className="btn btn-navy" style={{padding:"4px 9px",fontSize:10}} onClick={() => applyPreset("thisMonth")}>This Month</button>
+              </div>
+            </div>
+
+            {/* Date Range Fields */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}} className="fg">
+              <div>
+                <label className="fl">📅 From Date:</label>
+                <input
+                  type="date"
+                  className="fi"
+                  value={exportStart}
+                  onChange={e => setExportStart(e.target.value)}
+                  disabled={isExporting}
+                  style={{fontWeight:600}}
+                />
+              </div>
+              <div>
+                <label className="fl">📅 To Date:</label>
+                <input
+                  type="date"
+                  className="fi"
+                  value={exportEnd}
+                  onChange={e => setExportEnd(e.target.value)}
+                  disabled={isExporting}
+                  style={{fontWeight:600}}
+                />
+              </div>
+            </div>
+
+            {/* Report Type Selection */}
+            <div className="fg">
+              <label className="fl">📑 Report Type:</label>
+              <select
+                className="fs"
+                value={exportType}
+                onChange={e => setExportType(e.target.value)}
+                disabled={isExporting}
+                style={{fontWeight:600}}
+              >
+                <option value="full">📦 Complete Master Report (All Data - Summary, Serials, Idle, Reloads)</option>
+                <option value="daily">📊 Daily & Hourly Production Summary</option>
+                <option value="serials">🔢 Scanned Serial Numbers</option>
+                <option value="idle">⏱ Idle Time Analysis</option>
+                <option value="missing">🔍 Missing Serials</option>
+                <option value="reloads">🔄 Reloads & Rescans</option>
+              </select>
+            </div>
+
+            {/* Optional Time Slot Filter */}
+            <div className="fg">
+              <label className="fl">⏱ Time Slot (Optional):</label>
+              <select
+                className="fs"
+                value={exportSlot}
+                onChange={e => setExportSlot(e.target.value)}
+                disabled={isExporting}
+              >
+                <option value="">All Day / All Slots (07:00 - 19:00)</option>
+                {SLOTS.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+
+            {isExporting && (
+              <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 12px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                <div className="spin" style={{width:16,height:16,borderColor:"#3b82f6",borderTopColor:"#1d4ed8"}}/>
+                <span style={{fontSize:12,fontWeight:600,color:"#1e40af"}}>{exportProgress}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+              <button
+                type="button"
+                className="btn btn-navy"
+                onClick={() => setShowExportModal(false)}
+                disabled={isExporting}
+                style={{padding:"8px 14px"}}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-export"
+                onClick={handleDownloadExcel}
+                disabled={isExporting}
+                style={{padding:"8px 18px",fontSize:12,gap:6}}
+              >
+                {isExporting ? "⏳ Exporting..." : "📥 Download Excel"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
