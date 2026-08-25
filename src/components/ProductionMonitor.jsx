@@ -2,7 +2,7 @@
 // Fully migrated from Google Apps Script to Aiven MySQL REST API
 // All callServer() and getSheet() calls replaced with apiFetch()
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Chart, registerables } from "chart.js";
 
 Chart.register(...registerables);
@@ -374,6 +374,18 @@ const CSS = `
   .ch-card{background:#fff;padding:12px;border-radius:9px;box-shadow:0 2px 6px rgba(0,0,0,.07);border:1px solid var(--g200)}
   .ch-card h4{font-size:11px;font-weight:700;color:var(--g700);margin-bottom:8px}
   .ch-wrap{position:relative;height:180px}
+  .report-filter-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--g100);padding:10px 14px;border-radius:9px;border:1px solid var(--g200);margin-bottom:12px}
+  .report-filter-group{display:flex;align-items:center;gap:6px}
+  .report-filter-group label{font-size:11px;font-weight:700;color:var(--g700);white-space:nowrap}
+  .report-actions{display:flex;gap:7px;align-items:center;margin-left:auto;flex-wrap:wrap}
+  .report-summary-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+  .report-chip{padding:5px 11px;border-radius:18px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--g200);color:var(--g700)}
+  .report-chip.primary{background:rgba(196,30,78,0.08);border-color:rgba(196,30,78,0.3);color:var(--accent)}
+  .report-tab-btn{padding:7px 13px;border-radius:7px;border:1px solid var(--g200);background:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif;transition:.15s;display:inline-flex;align-items:center;gap:4px;color:var(--g700)}
+  .report-tab-btn:hover{background:var(--g200)}
+  .report-tab-btn.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .btn-export{background:linear-gradient(135deg,#059669,#10b981);color:#fff;border:none;box-shadow:0 2px 6px rgba(16,185,129,.25)}
+  .btn-export:hover{background:linear-gradient(135deg,#047857,#059669);color:#fff}
 `;
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -672,7 +684,6 @@ function ProductionMonitor({ onLogout }) {
   const [uEmail,    setUEmail]    = useState("");
   const [uName,     setUName]     = useState("");
   const [usersList, setUsersList] = useState([]);
-  const [rptContent, setRptContent] = useState(null);
 
   const initHourly = (tgts) => SLOTS.map((s, i) => ({
     slot:s, prod:0,
@@ -1281,64 +1292,6 @@ function ProductionMonitor({ onLogout }) {
     }).catch(() => setUsersList([]));
   }, []);
 
-  // ── Reports ─────────────────────────────────────────────────────────────────
-  const rptDaily = useCallback(() => {
-    const ti  = (S.idles||[]).reduce((a,h) => a+(h.duration||0), 0);
-    const tr  = (S.reloads||[]).reduce((a,r) => a+(r.count||1), 0);
-    const tt  = (S.hourly||[]).reduce((a,h) => a+(h.target||0), 0);
-    const ach = tt > 0 ? Math.round(S.totalProd/tt*100) : 0;
-    setRptContent(
-      <div className="al al-ok">
-        <strong>Daily Production Report — {S.date}</strong><br/><br/>
-        Total Production: <strong>{S.totalProd||0}</strong><br/>
-        Total Target: <strong>{tt}</strong><br/>
-        Achievement: <strong>{ach}%</strong><br/>
-        Manpower: <strong>{manpower||0}</strong><br/>
-        Total Idle Time: <strong>{ti} min</strong><br/>
-        Total Reloads: <strong>{tr}</strong>
-      </div>
-    );
-  }, [S, manpower]);
-
-  const rptSerials = useCallback(() => {
-    if (!(S.serials||[]).length) { setRptContent(<div className="al al-info">No serials recorded yet.</div>); return; }
-    setRptContent(<>
-      <div className="sec-title">Serial Numbers — {S.date} ({S.serials.length} total)</div>
-      <div className="tbl-wrap"><table><thead><tr><th>#</th><th>Serial</th><th>Model</th><th>Time</th></tr></thead>
-      <tbody>{S.serials.map((s,i)=><tr key={i}><td>{i+1}</td><td><strong>{s.serial}</strong></td><td>{s.model}</td><td>{s.ts}</td></tr>)}</tbody>
-      </table></div>
-    </>);
-  }, [S]);
-
-  const rptIdle = useCallback(() => {
-    if (!(S.idles||[]).length) { setRptContent(<div className="al al-ok">No idle time recorded today! 🎉</div>); return; }
-    setRptContent(<>
-      <div className="sec-title">Idle Time Analysis — {S.date}</div>
-      <div className="tbl-wrap"><table><thead><tr><th>From</th><th>To</th><th>Duration</th><th>Department</th><th>Reason</th></tr></thead>
-      <tbody>{S.idles.map((r,i)=><tr key={i}><td>{r.from}</td><td>{r.to}</td><td><strong style={{color:"var(--red)"}}>{r.duration} min</strong></td><td>{r.dept}</td><td>{r.reason}</td></tr>)}</tbody>
-      </table></div>
-    </>);
-  }, [S]);
-
-  const rptMissing = useCallback(() => {
-    if (!sRange.model || sRange.date !== todayStr()) { setRptContent(<div className="al al-warn">No serial range set for today.</div>); return; }
-    const sc = new Set();
-    (S.serials||[]).forEach(s => {
-      if (s.model !== sRange.model) return;
-      const n = parseInt((s.serial.match(/(\d+)$/) || ["","0"])[1]);
-      if (n >= sRange.start && n <= sRange.end) sc.add(n);
-    });
-    const miss = [];
-    for (let i = sRange.start; i <= sRange.end; i++) { if (!sc.has(i)) miss.push(pad5(i)); }
-    if (!miss.length) { setRptContent(<div className="al al-ok">✅ All serials scanned! No missing.</div>); return; }
-    setRptContent(<>
-      <div className="al al-warn"><strong>Missing Serials — Model: {sRange.model} — Total: {miss.length}</strong></div>
-      <div className="tbl-wrap"><table><thead><tr><th>#</th><th>Missing Serial</th></tr></thead>
-      <tbody>{miss.map((s,i)=><tr key={i}><td>{i+1}</td><td><strong>{s}</strong></td></tr>)}</tbody>
-      </table></div>
-    </>);
-  }, [S, sRange]);
-
   // ── Export ───────────────────────────────────────────────────────────────────
   const dlFile = (content, name, mime) => {
     const blob = new Blob([content], { type:mime }), url = URL.createObjectURL(blob);
@@ -1577,7 +1530,15 @@ function ProductionMonitor({ onLogout }) {
             mpInput={mpInput} setMpInput={setMpInput} manpower={manpower} setMP={setMP}
           />
         )}
-        {activeTab==="reports"  && <ReportsTab rptDaily={rptDaily} rptSerials={rptSerials} rptIdle={rptIdle} rptMissing={rptMissing} rptContent={rptContent}/>}
+        {activeTab==="reports"  && (
+          <ReportsTab
+            liveS={S}
+            liveManpower={manpower}
+            liveSRange={sRange}
+            appSettings={appSettings}
+            apiFetch={apiFetch}
+          />
+        )}
         {activeTab==="charts"   && <ChartsTab S={S} manpower={manpower}/>}
         {activeTab==="settings" && (
           <SettingsTab
@@ -1764,19 +1725,785 @@ function ScanningTab({ S, scanLocked, seqBanner, scanInputsVisible, curModel, on
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// REPORTS TAB
+// REPORTS TAB (with Date Filter, Time Slot Filter & Excel Export)
 // ═══════════════════════════════════════════════════════════════════════════════
-function ReportsTab({ rptDaily, rptSerials, rptIdle, rptMissing, rptContent }) {
+function dlExcelCSV(filename, rows) {
+  const csvContent = "\uFEFF" + rows.map(row =>
+    (row || []).map(cell => {
+      const s = cell == null ? "" : String(cell);
+      if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }).join(",")
+  ).join("\r\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) {
+  const [reportDate, setReportDate] = useState(liveS?.date || todayStr());
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [activeReport, setActiveReport] = useState("daily");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadedData, setLoadedData] = useState(null);
+  const [loadError, setLoadError] = useState("");
+
+  const isToday = reportDate === (liveS?.date || todayStr());
+
+  // Function to load data for selected date
+  const loadDateData = useCallback(async (targetDate) => {
+    setIsLoading(true);
+    setLoadError("");
+    try {
+      const [prodRes, idleRes, rldRes, rngRes, mpRes] = await Promise.all([
+        apiFetch("GET", `/data?date=${encodeURIComponent(targetDate)}`),
+        apiFetch("GET", `/idle?date=${encodeURIComponent(targetDate)}`),
+        apiFetch("GET", `/reloads?date=${encodeURIComponent(targetDate)}`),
+        apiFetch("GET", `/ranges?date=${encodeURIComponent(targetDate)}`),
+        apiFetch("GET", `/manpower?date=${encodeURIComponent(targetDate)}`),
+      ]);
+
+      const serials = [];
+      if (prodRes?.data && prodRes.data.length > 1) {
+        for (let i = 1; i < prodRes.data.length; i++) {
+          const r = prodRes.data[i];
+          const ser = String(r[3] || "").trim();
+          if (ser && !serials.find(x => x.serial === ser)) {
+            serials.push({ serial: ser, model: String(r[2] || "").trim(), ts: String(r[0] || "").trim() });
+          }
+        }
+      }
+
+      const idles = [];
+      if (idleRes?.data && idleRes.data.length > 1) {
+        for (let i = 1; i < idleRes.data.length; i++) {
+          const r = idleRes.data[i];
+          const slot = normSlot(String(r[6] || "").trim());
+          const dur = parseFloat(r[3]) || 0;
+          const ft = String(r[1] || "").trim();
+          const tt = String(r[2] || "").trim();
+          if (!idles.find(x => x.slot === slot && x.from === ft && x.to === tt)) {
+            idles.push({ from: ft, to: tt, duration: dur, dept: String(r[4] || "").trim(), reason: String(r[5] || "").trim(), slot });
+          }
+        }
+      }
+
+      const reloads = [];
+      if (rldRes?.data && rldRes.data.length > 1) {
+        for (let i = 1; i < rldRes.data.length; i++) {
+          const r = rldRes.data[i];
+          const slot = normSlot(String(r[1] || "").trim());
+          const ts_ = String(r[4] || "").trim();
+          const cnt = parseInt(r[3]) || 1;
+          if (!reloads.find(x => x.slot === slot && x.type === r[2] && x.ts === ts_)) {
+            reloads.push({ slot, type: String(r[2] || "").trim(), count: cnt, ts: ts_ });
+          }
+        }
+      }
+
+      const targets = appSettings?.targets || DEF_TARGETS;
+      const hourly = SLOTS.map((s, i) => ({
+        slot: s,
+        prod: 0,
+        target: targets[i] !== undefined ? targets[i] : DEF_TARGETS[i],
+        idle: 0,
+        dept: "",
+        reason: "",
+        reloads: 0,
+      }));
+
+      serials.forEach(s => {
+        const idx = tsToSlot(s.ts);
+        if (idx >= 0 && idx < 12) hourly[idx].prod++;
+      });
+
+      idles.forEach(r => {
+        const idx = SLOTS.indexOf(r.slot);
+        if (idx >= 0) {
+          hourly[idx].idle += (parseFloat(r.duration) || 0);
+          if (r.dept && !hourly[idx].dept) hourly[idx].dept = r.dept;
+          if (r.reason && !hourly[idx].reason) hourly[idx].reason = r.reason;
+        }
+      });
+
+      reloads.forEach(r => {
+        const idx = SLOTS.indexOf(r.slot);
+        if (idx >= 0) hourly[idx].reloads += (parseInt(r.count) || 1);
+      });
+
+      let sr = { model: "", start: 0, end: 0, date: targetDate };
+      if (rngRes?.data && rngRes.data.length > 1) {
+        const r = rngRes.data[1];
+        sr = { model: String(r[1] || ""), start: parseInt(r[2]) || 0, end: parseInt(r[3]) || 0, date: targetDate };
+      }
+
+      const mp = mpRes?.manpower || 0;
+      const totalProd = serials.length;
+
+      setLoadedData({
+        date: targetDate,
+        totalProd,
+        hourly,
+        serials,
+        idles,
+        reloads,
+        manpower: mp,
+        sRange: sr,
+      });
+    } catch (err) {
+      console.error("Failed to load date data:", err);
+      setLoadError("Failed to fetch data for " + targetDate);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [apiFetch, appSettings]);
+
+  // Effect to load on date change
+  useEffect(() => {
+    if (!isToday) {
+      loadDateData(reportDate);
+    } else {
+      setLoadedData(null);
+    }
+  }, [reportDate, isToday, loadDateData]);
+
+  // Active dataset
+  const activeS = (!isToday && loadedData) ? loadedData : (liveS || {});
+  const activeMP = (!isToday && loadedData) ? (loadedData.manpower || 0) : (liveManpower || 0);
+  const activeSR = (!isToday && loadedData) ? loadedData.sRange : (liveSRange || {});
+
+  // Filtered Serials
+  const allSerials = activeS?.serials || [];
+  const filteredSerials = useMemo(() => {
+    return allSerials.filter(s => {
+      if (selectedSlot) {
+        const slotIdx = tsToSlot(s.ts);
+        if (slotIdx < 0 || SLOTS[slotIdx] !== selectedSlot) return false;
+      }
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        return String(s.serial).toLowerCase().includes(term) || String(s.model).toLowerCase().includes(term);
+      }
+      return true;
+    });
+  }, [allSerials, selectedSlot, searchTerm]);
+
+  // Filtered Idles
+  const allIdles = activeS?.idles || [];
+  const filteredIdles = useMemo(() => {
+    return allIdles.filter(r => {
+      if (selectedSlot && normSlot(r.slot) !== selectedSlot) return false;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        return String(r.dept).toLowerCase().includes(term) || String(r.reason).toLowerCase().includes(term);
+      }
+      return true;
+    });
+  }, [allIdles, selectedSlot, searchTerm]);
+
+  // Filtered Reloads
+  const allReloads = activeS?.reloads || [];
+  const filteredReloads = useMemo(() => {
+    return allReloads.filter(r => {
+      if (selectedSlot && normSlot(r.slot) !== selectedSlot) return false;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        return String(r.type).toLowerCase().includes(term) || String(r.slot).toLowerCase().includes(term);
+      }
+      return true;
+    });
+  }, [allReloads, selectedSlot, searchTerm]);
+
+  // Hourly stats & calculations
+  const hourlyData = activeS?.hourly || [];
+  const slotStats = useMemo(() => {
+    if (selectedSlot) {
+      const slotRow = hourlyData.find(h => h.slot === selectedSlot) || { prod: 0, target: 0, idle: 0, reloads: 0, dept: "", reason: "" };
+      const ach = (slotRow.target || 0) > 0 ? Math.round(((slotRow.prod || 0) / slotRow.target) * 100) : 0;
+      return {
+        prod: slotRow.prod || 0,
+        target: slotRow.target || 0,
+        ach,
+        idle: slotRow.idle || 0,
+        reloads: slotRow.reloads || 0,
+        dept: slotRow.dept || "-",
+        reason: slotRow.reason || "-",
+      };
+    } else {
+      const totProd = activeS?.totalProd || allSerials.length;
+      const totTarget = hourlyData.reduce((a, h) => a + (h.target || 0), 0);
+      const totIdle = allIdles.reduce((a, h) => a + (h.duration || 0), 0);
+      const totReloads = allReloads.reduce((a, r) => a + (r.count || 1), 0);
+      const ach = totTarget > 0 ? Math.round((totProd / totTarget) * 100) : 0;
+      return {
+        prod: totProd,
+        target: totTarget,
+        ach,
+        idle: totIdle,
+        reloads: totReloads,
+        dept: "-",
+        reason: "-",
+      };
+    }
+  }, [selectedSlot, hourlyData, activeS, allSerials, allIdles, allReloads]);
+
+  // Missing Serials calculation
+  const missingSerialsList = useMemo(() => {
+    if (!activeSR?.model || !activeSR.start || !activeSR.end) return [];
+    const scannedSet = new Set();
+    allSerials.forEach(s => {
+      if (s.model !== activeSR.model) return;
+      const n = extractNum(s.serial);
+      if (n !== null && n >= activeSR.start && n <= activeSR.end) {
+        scannedSet.add(n);
+      }
+    });
+    const missing = [];
+    for (let i = activeSR.start; i <= activeSR.end; i++) {
+      if (!scannedSet.has(i)) {
+        missing.push({ num: i, serial: pad5(i), model: activeSR.model });
+      }
+    }
+    return missing;
+  }, [activeSR, allSerials]);
+
+  // Excel / CSV Export function
+  const exportToExcel = (mode = "active") => {
+    const dStr = reportDate || todayStr();
+    const sStr = selectedSlot ? selectedSlot.replace(/:/g, "-") : "AllDay";
+
+    if (mode === "full") {
+      const rows = [
+        ["PG GROUP / ATOMBERG PRODUCTION REPORT - FULL SUMMARY"],
+        ["Date", dStr],
+        ["Generated At", new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST"],
+        ["Total Production", activeS?.totalProd || allSerials.length],
+        ["Total Target", hourlyData.reduce((a, h) => a + (h.target || 0), 0)],
+        ["Manpower", activeMP],
+        ["Total Idle Time (min)", allIdles.reduce((a, h) => a + (h.duration || 0), 0)],
+        ["Total Reloads", allReloads.reduce((a, r) => a + (r.count || 1), 0)],
+        [],
+        ["--- HOURLY BREAKDOWN ---"],
+        ["Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Department", "Reason", "Reloads"],
+        ...hourlyData.map(h => {
+          const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+          return [h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.dept || "-", h.reason || "-", h.reloads || 0];
+        }),
+        [],
+        ["--- SCANNED SERIAL NUMBERS (" + allSerials.length + " Total) ---"],
+        ["#", "Serial Number", "Model", "Timestamp", "Slot"],
+        ...allSerials.map((s, idx) => {
+          const sIdx = tsToSlot(s.ts);
+          return [idx + 1, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
+        }),
+        [],
+        ["--- IDLE TIME RECORDS (" + allIdles.length + " Total) ---"],
+        ["#", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
+        ...allIdles.map((r, idx) => [idx + 1, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
+        [],
+        ["--- RELOADS RECORDS (" + allReloads.length + " Total) ---"],
+        ["#", "Slot", "Type", "Count", "Timestamp"],
+        ...allReloads.map((r, idx) => [idx + 1, r.slot, r.type, r.count, r.ts || "-"]),
+      ];
+      dlExcelCSV(`Production_Full_Report_${dStr}.csv`, rows);
+      return;
+    }
+
+    if (activeReport === "daily") {
+      const rows = [
+        ["PG GROUP - DAILY PRODUCTION SUMMARY"],
+        ["Date", dStr],
+        ["Time Filter", selectedSlot || "All Day (07:00-19:00)"],
+        ["Total Production", slotStats.prod],
+        ["Target", slotStats.target],
+        ["Achievement %", slotStats.ach + "%"],
+        ["Manpower", activeMP],
+        ["Idle Time (min)", slotStats.idle],
+        ["Reloads", slotStats.reloads],
+        [],
+        ["Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Department", "Reason", "Reloads"],
+        ...hourlyData
+          .filter(h => !selectedSlot || h.slot === selectedSlot)
+          .map(h => {
+            const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+            return [h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.dept || "-", h.reason || "-", h.reloads || 0];
+          }),
+      ];
+      dlExcelCSV(`Daily_Summary_${dStr}_${sStr}.csv`, rows);
+    } else if (activeReport === "serials") {
+      const rows = [
+        ["PG GROUP - SERIAL NUMBERS REPORT"],
+        ["Date", dStr],
+        ["Time Filter", selectedSlot || "All Day"],
+        ["Total Serials", filteredSerials.length],
+        [],
+        ["#", "Serial Number", "Model", "Timestamp", "Slot", "Date"],
+        ...filteredSerials.map((s, idx) => {
+          const sIdx = tsToSlot(s.ts);
+          return [idx + 1, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-", dStr];
+        }),
+      ];
+      dlExcelCSV(`Serials_Report_${dStr}_${sStr}.csv`, rows);
+    } else if (activeReport === "idle") {
+      const rows = [
+        ["PG GROUP - IDLE TIME ANALYSIS REPORT"],
+        ["Date", dStr],
+        ["Time Filter", selectedSlot || "All Day"],
+        ["Total Incidents", filteredIdles.length],
+        [],
+        ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
+        ...filteredIdles.map((r, idx) => [idx + 1, dStr, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
+      ];
+      dlExcelCSV(`Idle_Analysis_${dStr}_${sStr}.csv`, rows);
+    } else if (activeReport === "missing") {
+      const rows = [
+        ["PG GROUP - MISSING SERIALS REPORT"],
+        ["Date", dStr],
+        ["Model", activeSR?.model || "N/A"],
+        ["Range", activeSR?.start ? `${activeSR.start} - ${activeSR.end}` : "N/A"],
+        ["Total Missing", missingSerialsList.length],
+        [],
+        ["#", "Model", "Missing Serial Number", "Date"],
+        ...missingSerialsList.map((m, idx) => [idx + 1, m.model, m.serial, dStr]),
+      ];
+      dlExcelCSV(`Missing_Serials_${dStr}.csv`, rows);
+    } else if (activeReport === "reloads") {
+      const rows = [
+        ["PG GROUP - RELOADS REPORT"],
+        ["Date", dStr],
+        ["Time Filter", selectedSlot || "All Day"],
+        ["Total Records", filteredReloads.length],
+        [],
+        ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
+        ...filteredReloads.map((r, idx) => [idx + 1, dStr, r.slot, r.type, r.count, r.ts || "-"]),
+      ];
+      dlExcelCSV(`Reloads_Report_${dStr}_${sStr}.csv`, rows);
+    }
+  };
+
+  const activeReportLabel = {
+    daily: "Daily Summary",
+    serials: `Serials (${filteredSerials.length})`,
+    idle: `Idle Time (${filteredIdles.length})`,
+    missing: `Missing (${missingSerialsList.length})`,
+    reloads: `Reloads (${filteredReloads.length})`,
+  }[activeReport] || "Report";
+
   return (
     <div className="tab-pane">
-      <div className="sec-title" style={{fontSize:14,marginBottom:12}}>Production Reports</div>
-      <div className="btn-row" style={{marginBottom:14}}>
-        <button className="btn btn-navy" onClick={rptDaily}>📊 Daily Report</button>
-        <button className="btn btn-grn"  onClick={rptSerials}>🔢 Serial Report</button>
-        <button className="btn btn-amb"  onClick={rptIdle}>⏱ Idle Analysis</button>
-        <button className="btn btn-teal" onClick={rptMissing}>🔍 Missing Serials</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div className="sec-title" style={{fontSize:15,margin:0,display:"flex",alignItems:"center",gap:8}}>
+          📋 Production Reports & Analysis
+          {isToday ? (
+            <span style={{background:"#d1fae5",color:"#065f46",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:12,border:"1px solid #6ee7b7"}}>
+              🟢 LIVE TODAY
+            </span>
+          ) : (
+            <span style={{background:"#fef3c7",color:"#92400e",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:12,border:"1px solid #fbbf24"}}>
+              📅 HISTORICAL: {reportDate}
+            </span>
+          )}
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button
+            className="btn btn-export"
+            onClick={() => exportToExcel("active")}
+            title="Download currently active report view to Excel"
+          >
+            📥 Download Excel ({activeReportLabel})
+          </button>
+          <button
+            className="btn btn-navy"
+            onClick={() => exportToExcel("full")}
+            title="Download complete multi-section report to Excel"
+          >
+            📦 Download Full Day Excel
+          </button>
+        </div>
       </div>
-      <div>{rptContent}</div>
+
+      {/* Filter Toolbar */}
+      <div className="report-filter-bar">
+        {/* Date Filter */}
+        <div className="report-filter-group">
+          <label>📅 Date:</label>
+          <input
+            type="date"
+            className="fi"
+            value={reportDate}
+            onChange={e => setReportDate(e.target.value)}
+            style={{width:145,padding:"5px 8px",fontWeight:600}}
+          />
+          {!isToday && (
+            <button
+              className="btn btn-navy"
+              style={{padding:"5px 9px",fontSize:10}}
+              onClick={() => setReportDate(liveS?.date || todayStr())}
+              title="Reset to today"
+            >
+              Today
+            </button>
+          )}
+        </div>
+
+        {/* Time Slot Filter */}
+        <div className="report-filter-group">
+          <label>⏱ Time Slot:</label>
+          <select
+            className="fs"
+            value={selectedSlot}
+            onChange={e => setSelectedSlot(e.target.value)}
+            style={{width:170,padding:"5px 8px",fontWeight:600}}
+          >
+            <option value="">All Day (07:00 - 19:00)</option>
+            {SLOTS.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          {selectedSlot && (
+            <button
+              className="btn btn-navy"
+              style={{padding:"5px 8px",fontSize:10}}
+              onClick={() => setSelectedSlot("")}
+              title="Clear time filter"
+            >
+              ✕ All Slots
+            </button>
+          )}
+        </div>
+
+        {/* Search Box */}
+        <div className="report-filter-group" style={{minWidth:180}}>
+          <input
+            type="text"
+            className="fi"
+            placeholder="🔍 Search in report..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            style={{padding:"5px 8px",fontSize:11}}
+          />
+        </div>
+
+        <div className="report-actions">
+          <button
+            className="btn btn-navy"
+            style={{padding:"5px 10px",fontSize:11}}
+            onClick={() => isToday ? null : loadDateData(reportDate)}
+            disabled={isLoading}
+          >
+            {isLoading ? "⏳ Loading..." : "🔄 Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {loadError && <div className="al al-err">{loadError}</div>}
+      {isLoading && (
+        <div style={{textAlign:"center",padding:24}}>
+          <div className="spin" style={{width:24,height:24}}/>
+          <div style={{marginTop:8,fontSize:12,color:"var(--g600)",fontWeight:600}}>Loading report data for {reportDate}...</div>
+        </div>
+      )}
+
+      {!isLoading && (
+        <>
+          {/* Summary Chips */}
+          <div className="report-summary-bar">
+            <div className={`report-chip ${selectedSlot ? "primary" : ""}`}>
+              <span>⏱ Slot:</span> <strong>{selectedSlot || "Full Day"}</strong>
+            </div>
+            <div className="report-chip">
+              <span>Production:</span> <strong>{slotStats.prod}</strong>
+            </div>
+            <div className="report-chip">
+              <span>Target:</span> <strong>{slotStats.target}</strong>
+            </div>
+            <div className="report-chip">
+              <span>Achievement:</span> <strong style={{color: slotStats.ach >= 90 ? "var(--green)" : slotStats.ach >= 70 ? "var(--amber)" : "var(--red)"}}>{slotStats.ach}%</strong>
+            </div>
+            <div className="report-chip">
+              <span>Manpower:</span> <strong>{activeMP}</strong>
+            </div>
+            <div className="report-chip">
+              <span>Idle Time:</span> <strong style={{color: slotStats.idle > 0 ? "var(--red)" : "var(--green)"}}>{slotStats.idle} min</strong>
+            </div>
+            <div className="report-chip">
+              <span>Reloads:</span> <strong>{slotStats.reloads}</strong>
+            </div>
+          </div>
+
+          {/* Navigation Buttons for Report View */}
+          <div className="btn-row" style={{marginBottom:14,borderBottom:"1px solid var(--g200)",paddingBottom:10}}>
+            <button
+              className={`report-tab-btn ${activeReport === "daily" ? "active" : ""}`}
+              onClick={() => setActiveReport("daily")}
+            >
+              📊 Daily Summary
+            </button>
+            <button
+              className={`report-tab-btn ${activeReport === "serials" ? "active" : ""}`}
+              onClick={() => setActiveReport("serials")}
+            >
+              🔢 Serials ({filteredSerials.length})
+            </button>
+            <button
+              className={`report-tab-btn ${activeReport === "idle" ? "active" : ""}`}
+              onClick={() => setActiveReport("idle")}
+            >
+              ⏱ Idle Analysis ({filteredIdles.length})
+            </button>
+            <button
+              className={`report-tab-btn ${activeReport === "missing" ? "active" : ""}`}
+              onClick={() => setActiveReport("missing")}
+            >
+              🔍 Missing Serials ({missingSerialsList.length})
+            </button>
+            <button
+              className={`report-tab-btn ${activeReport === "reloads" ? "active" : ""}`}
+              onClick={() => setActiveReport("reloads")}
+            >
+              🔄 Reloads ({filteredReloads.length})
+            </button>
+          </div>
+
+          {/* Active Report Content */}
+          {activeReport === "daily" && (
+            <div>
+              <div className="kpi-grid" style={{marginBottom:14}}>
+                <div className={`kpi-card ${slotStats.ach >= 90 ? "green" : slotStats.ach >= 70 ? "amber" : "red"}`}>
+                  <div className="v">{slotStats.prod}</div>
+                  <div className="l">PRODUCTION ({selectedSlot || "DAY"})</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="v">{slotStats.target}</div>
+                  <div className="l">TARGET</div>
+                </div>
+                <div className={`kpi-card ${slotStats.ach >= 90 ? "green" : slotStats.ach >= 70 ? "amber" : "red"}`}>
+                  <div className="v">{slotStats.ach}%</div>
+                  <div className="l">ACHIEVEMENT</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="v">{slotStats.idle}m</div>
+                  <div className="l">IDLE TIME</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="v">{slotStats.reloads}</div>
+                  <div className="l">RELOADS</div>
+                </div>
+              </div>
+
+              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
+                Hourly Breakdown — {reportDate} {selectedSlot && `(Filtered: ${selectedSlot})`}
+              </div>
+              <div className="tbl-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Time Slot</th>
+                      <th>Production</th>
+                      <th>Target</th>
+                      <th>Achievement</th>
+                      <th>Idle (min)</th>
+                      <th>Department</th>
+                      <th>Reason</th>
+                      <th>Reloads</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hourlyData
+                      .filter(h => !selectedSlot || h.slot === selectedSlot)
+                      .map((h, i) => {
+                        const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+                        const rowClass = ach >= 100 ? "row-green" : ach >= 70 ? "row-amber" : (h.prod > 0 || (h.target || 0) > 0) ? "row-red" : "";
+                        return (
+                          <tr key={h.slot} className={rowClass}>
+                            <td>{i + 1}</td>
+                            <td><strong>{h.slot}</strong></td>
+                            <td><strong>{h.prod || 0}</strong></td>
+                            <td>{h.target || 0}</td>
+                            <td><strong>{ach}%</strong></td>
+                            <td>{h.idle > 0 ? <strong style={{color:"var(--red)"}}>{h.idle}m</strong> : "0"}</td>
+                            <td>{h.dept || "-"}</td>
+                            <td style={{maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.reason || "-"}</td>
+                            <td>{h.reloads || 0}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeReport === "serials" && (
+            <div>
+              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
+                Scanned Serial Numbers — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredSerials.length} records)
+              </div>
+              {!filteredSerials.length ? (
+                <div className="al al-info">No serial numbers found matching the selected filters.</div>
+              ) : (
+                <div className="tbl-wrap" style={{maxHeight:450,overflowY:"auto"}}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{width:50}}>#</th>
+                        <th>Serial Number</th>
+                        <th>Model</th>
+                        <th>Timestamp</th>
+                        <th>Time Slot</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSerials.map((s, i) => {
+                        const sIdx = tsToSlot(s.ts);
+                        return (
+                          <tr key={i}>
+                            <td>{i + 1}</td>
+                            <td><strong style={{color:"var(--navy)",fontFamily:"monospace",fontSize:13}}>{s.serial}</strong></td>
+                            <td><span style={{background:"var(--g100)",padding:"2px 6px",borderRadius:4,fontWeight:600}}>{s.model}</span></td>
+                            <td>{s.ts}</td>
+                            <td>{sIdx >= 0 ? SLOTS[sIdx] : "-"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeReport === "idle" && (
+            <div>
+              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
+                Idle Time Analysis — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredIdles.length} records)
+              </div>
+              {!filteredIdles.length ? (
+                <div className="al al-ok">No idle time recorded for the selected filter! 🎉</div>
+              ) : (
+                <div className="tbl-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Time Slot</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Duration</th>
+                        <th>Department</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredIdles.map((r, i) => (
+                        <tr key={i}>
+                          <td>{i + 1}</td>
+                          <td><strong>{r.slot}</strong></td>
+                          <td>{r.from}</td>
+                          <td>{r.to}</td>
+                          <td><strong style={{color:"var(--red)"}}>{r.duration} min</strong></td>
+                          <td><strong>{r.dept}</strong></td>
+                          <td>{r.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeReport === "missing" && (
+            <div>
+              {!activeSR?.model ? (
+                <div className="al al-warn">No serial range configured for {reportDate}. Please configure ranges in Settings.</div>
+              ) : (
+                <>
+                  <div className="al al-info" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <div>
+                      <strong>Model:</strong> {activeSR.model} &nbsp;|&nbsp;
+                      <strong>Range:</strong> {activeSR.start} - {activeSR.end} &nbsp;|&nbsp;
+                      <strong>Expected:</strong> {activeSR.end - activeSR.start + 1} &nbsp;|&nbsp;
+                      <strong>Missing:</strong> <span style={{color:"var(--red)",fontWeight:800}}>{missingSerialsList.length}</span>
+                    </div>
+                  </div>
+                  {!missingSerialsList.length ? (
+                    <div className="al al-ok">✅ All serial numbers scanned in this range! No missing serials.</div>
+                  ) : (
+                    <div className="tbl-wrap" style={{maxHeight:450,overflowY:"auto"}}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{width:60}}>#</th>
+                            <th>Model</th>
+                            <th>Missing Serial Number</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {missingSerialsList.map((m, i) => (
+                            <tr key={i}>
+                              <td>{i + 1}</td>
+                              <td>{m.model}</td>
+                              <td><strong style={{color:"var(--red)",fontFamily:"monospace",fontSize:13}}>{m.serial}</strong></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {activeReport === "reloads" && (
+            <div>
+              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
+                Reloads / Rescans — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredReloads.length} records)
+              </div>
+              {!filteredReloads.length ? (
+                <div className="al al-info">No reloads recorded for the selected filter.</div>
+              ) : (
+                <div className="tbl-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Slot</th>
+                        <th>Type</th>
+                        <th>Count</th>
+                        <th>Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReloads.map((r, i) => (
+                        <tr key={i}>
+                          <td>{i + 1}</td>
+                          <td><strong>{r.slot}</strong></td>
+                          <td><span style={{background:"var(--g100)",padding:"2px 6px",borderRadius:4,fontWeight:600}}>{r.type}</span></td>
+                          <td><strong>{r.count}</strong></td>
+                          <td>{r.ts || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
