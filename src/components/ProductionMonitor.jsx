@@ -1809,10 +1809,10 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
   // Modal State for Excel Export
   const [exportStart, setExportStart] = useState(liveS?.date || todayStr());
   const [exportEnd, setExportEnd] = useState(liveS?.date || todayStr());
-  const [exportType, setExportType] = useState("full");
-  const [exportSlot, setExportSlot] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
+  const exportType = "full";
+  const exportSlot = "";
 
   const isToday = reportDate === (liveS?.date || todayStr());
 
@@ -1937,8 +1937,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
   useEffect(() => {
     setExportStart(reportDate || todayStr());
     setExportEnd(reportDate || todayStr());
-    setExportSlot(selectedSlot || "");
-  }, [reportDate, selectedSlot]);
+  }, [reportDate]);
 
   // Active dataset for current view
   const activeS = (!isToday && loadedData) ? loadedData : (liveS || {});
@@ -2896,7 +2895,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
             </div>
 
             {/* Date Range Fields */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}} className="fg">
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}} className="fg">
               <div>
                 <label className="fl">📅 From Date:</label>
                 <input
@@ -2919,41 +2918,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
                   style={{fontWeight:600}}
                 />
               </div>
-            </div>
-
-            {/* Report Type Selection */}
-            <div className="fg">
-              <label className="fl">📑 Report Type:</label>
-              <select
-                className="fs"
-                value={exportType}
-                onChange={e => setExportType(e.target.value)}
-                disabled={isExporting}
-                style={{fontWeight:600}}
-              >
-                <option value="full">📦 Complete Master Report (All Data - Summary, Serials, Idle, Reloads)</option>
-                <option value="daily">📊 Daily & Hourly Production Summary</option>
-                <option value="serials">🔢 Scanned Serial Numbers</option>
-                <option value="idle">⏱ Idle Time Analysis</option>
-                <option value="missing">🔍 Missing Serials</option>
-                <option value="reloads">🔄 Reloads & Rescans</option>
-              </select>
-            </div>
-
-            {/* Optional Time Slot Filter */}
-            <div className="fg">
-              <label className="fl">⏱ Time Slot (Optional):</label>
-              <select
-                className="fs"
-                value={exportSlot}
-                onChange={e => setExportSlot(e.target.value)}
-                disabled={isExporting}
-              >
-                <option value="">All Day / All Slots (07:00 - 19:00)</option>
-                {SLOTS.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
             </div>
 
             {isExporting && (
