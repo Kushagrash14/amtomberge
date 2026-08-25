@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Chart, registerables } from "chart.js";
+import ExcelJS from "exceljs";
 
 Chart.register(...registerables);
 if (typeof window !== "undefined") window.Chart = Chart;
@@ -1776,217 +1777,564 @@ function ScanningTab({ S, scanLocked, seqBanner, scanInputsVisible, curModel, on
 // ═══════════════════════════════════════════════════════════════════════════════
 // REPORTS TAB (with Date Filter, Time Slot Filter & Excel Export)
 // ═══════════════════════════════════════════════════════════════════════════════
-function dlIndustrialExcel(filename, reportData) {
-  const {
-    sDate, eDate, dateCount, generatedAt,
-    totalProd, totalTarget, overallAch, totalIdle, totalReloads, avgManpower,
-    hourlyRowsHtml, serialRowsHtml, serialCount, idleRowsHtml, idleCount, reloadRowsHtml, reloadCount, missingRowsHtml, missingCount
-  } = reportData;
+async function exportMultiTabExcel(filename, allDaysData, meta) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "PG Electroplast Limited";
+  wb.lastModifiedBy = "Atomberg Production System";
+  wb.created = new Date();
 
-  const html = `
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-  <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"/>
-  <!--[if gte mso 9]>
-  <xml>
-    <x:ExcelWorkbook>
-      <x:ExcelWorksheets>
-        <x:ExcelWorksheet>
-          <x:Name>Atomberg Production Audit</x:Name>
-          <x:WorksheetOptions>
-            <x:DisplayGridlines/>
-          </x:WorksheetOptions>
-        </x:ExcelWorksheet>
-      </x:ExcelWorksheets>
-    </x:ExcelWorkbook>
-  </xml>
-  <![endif]-->
-  <style>
-    body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 11pt; color: #0f172a; margin: 0; }
-    table { border-collapse: collapse; margin-bottom: 22px; width: 100%; }
-    th, td { border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10.5pt; vertical-align: middle; }
-    
-    .hdr-main { background-color: #0f172a; color: #ffffff; font-size: 15pt; font-weight: bold; text-align: center; height: 38px; }
-    .hdr-sub { background-color: #1e293b; color: #93c5fd; font-size: 11pt; font-weight: bold; text-align: center; height: 26px; }
-    
-    .meta-hdr { background-color: #1e3a8a; color: #ffffff; font-weight: bold; font-size: 11pt; height: 26px; }
-    .meta-lbl { background-color: #f1f5f9; font-weight: bold; color: #334155; }
-    .meta-val { background-color: #ffffff; color: #0f172a; font-weight: 600; }
-    
-    .kpi-lbl { background-color: #f8fafc; font-size: 9pt; font-weight: bold; color: #64748b; text-align: center; text-transform: uppercase; }
-    .kpi-val { font-size: 14pt; font-weight: bold; text-align: center; height: 34px; }
-    
-    .sec-bar { background-color: #1e40af; color: #ffffff; font-size: 12pt; font-weight: bold; padding: 8px 12px; height: 30px; }
-    .tbl-th { background-color: #2563eb; color: #ffffff; font-weight: bold; text-align: center; font-size: 10pt; height: 28px; }
-    
-    .row-even { background-color: #ffffff; }
-    .row-odd { background-color: #f8fafc; }
-    
-    .badge-ok { background-color: #dcfce7; color: #166534; font-weight: bold; text-align: center; }
-    .badge-warn { background-color: #fef3c7; color: #92400e; font-weight: bold; text-align: center; }
-    .badge-bad { background-color: #fee2e2; color: #991b1b; font-weight: bold; text-align: center; }
-    
-    .num-pos { color: #16a34a; font-weight: bold; }
-    .num-neg { color: #dc2626; font-weight: bold; }
-    .num-zero { color: #64748b; font-weight: 600; }
-    
-    .tot-row { background-color: #e2e8f0; font-weight: bold; font-size: 11pt; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; }
-    .tot-lbl { background-color: #cbd5e1; font-weight: bold; font-size: 11pt; text-align: center; }
-    
-    .text-c { text-align: center; }
-    .text-r { text-align: right; }
-    .text-l { text-align: left; }
-    .mono { font-family: 'Consolas', monospace; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <!-- HEADER BANNER -->
-  <table>
-    <tr>
-      <th colspan="12" class="hdr-main">PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM</th>
-    </tr>
-    <tr>
-      <th colspan="12" class="hdr-sub">ATOMBERG ASSEMBLY & PACKAGING LINE — INDUSTRIAL AUDIT & PERFORMANCE REPORT</th>
-    </tr>
-  </table>
+  const thinBorder = {
+    top: { style: "thin", color: { argb: "FFCBD5E1" } },
+    left: { style: "thin", color: { argb: "FFCBD5E1" } },
+    bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+    right: { style: "thin", color: { argb: "FFCBD5E1" } },
+  };
 
-  <!-- EXECUTIVE SUMMARY & METADATA -->
-  <table>
-    <tr>
-      <th colspan="12" class="meta-hdr">📋 REPORT PARAMETERS & METADATA</th>
-    </tr>
-    <tr>
-      <td colspan="3" class="meta-lbl">Date Range:</td>
-      <td colspan="3" class="meta-val">${sDate} to ${eDate} (${dateCount} Day${dateCount > 1 ? "s" : ""})</td>
-      <td colspan="3" class="meta-lbl">Shift Operating Window:</td>
-      <td colspan="3" class="meta-val">Full Day Operations (07:00 - 19:00 IST)</td>
-    </tr>
-    <tr>
-      <td colspan="3" class="meta-lbl">Report Generated At:</td>
-      <td colspan="3" class="meta-val">${generatedAt}</td>
-      <td colspan="3" class="meta-lbl">Industrial Line Status:</td>
-      <td colspan="3" class="meta-val" style="color:#16a34a;font-weight:bold;">LIVE AUDIT VERIFIED ✓</td>
-    </tr>
-  </table>
+  const totalBorder = {
+    top: { style: "medium", color: { argb: "FF0F172A" } },
+    left: { style: "thin", color: { argb: "FFCBD5E1" } },
+    bottom: { style: "double", color: { argb: "FF0F172A" } },
+    right: { style: "thin", color: { argb: "FFCBD5E1" } },
+  };
 
-  <!-- KEY PERFORMANCE INDICATORS (KPIs) -->
-  <table>
-    <tr>
-      <th colspan="2" class="kpi-lbl" style="background-color:#eff6ff;color:#1e40af;">Total Production</th>
-      <th colspan="2" class="kpi-lbl" style="background-color:#f1f5f9;color:#334155;">Planned Target</th>
-      <th colspan="2" class="kpi-lbl" style="background-color:#f0fdf4;color:#166534;">Line Achievement</th>
-      <th colspan="2" class="kpi-lbl" style="background-color:#fef2f2;color:#991b1b;">Total Downtime</th>
-      <th colspan="2" class="kpi-lbl" style="background-color:#fffbeb;color:#92400e;">Total Reloads</th>
-      <th colspan="2" class="kpi-lbl" style="background-color:#f5f3ff;color:#6d28d9;">Avg Manpower</th>
-    </tr>
-    <tr>
-      <td colspan="2" class="kpi-val" style="background-color:#eff6ff;color:#1d4ed8;">${Number(totalProd).toLocaleString()} Units</td>
-      <td colspan="2" class="kpi-val" style="background-color:#f1f5f9;color:#0f172a;">${Number(totalTarget).toLocaleString()} Units</td>
-      <td colspan="2" class="kpi-val" style="background-color:#f0fdf4;color:${parseFloat(overallAch)>=90?'#16a34a':parseFloat(overallAch)>=60?'#d97706':'#dc2626'};">${overallAch}%</td>
-      <td colspan="2" class="kpi-val" style="background-color:#fef2f2;color:#dc2626;">${totalIdle} Min (${(totalIdle/60).toFixed(1)}h)</td>
-      <td colspan="2" class="kpi-val" style="background-color:#fffbeb;color:#b45309;">${totalReloads}</td>
-      <td colspan="2" class="kpi-val" style="background-color:#f5f3ff;color:#7c3aed;">${avgManpower}</td>
-    </tr>
-  </table>
+  const styleCell = (cell, { bg, color, bold, size = 10, align = "center", border = thinBorder }) => {
+    if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+    cell.font = { name: "Segoe UI", size, bold: !!bold, color: { argb: color || "FF0F172A" } };
+    cell.alignment = { horizontal: align, vertical: "middle", wrapText: true };
+    if (border) cell.border = border;
+  };
 
-  <!-- SECTION 1: HOURLY PRODUCTION -->
-  <table>
-    <tr>
-      <th colspan="12" class="sec-bar">📊 SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER</th>
-    </tr>
-    <tr>
-      <th class="tbl-th" style="width:50px;">Sr. No.</th>
-      <th class="tbl-th" style="width:100px;">Date</th>
-      <th class="tbl-th" style="width:120px;">Time Slot</th>
-      <th class="tbl-th" style="width:90px;">Target</th>
-      <th class="tbl-th" style="width:90px;">Actual</th>
-      <th class="tbl-th" style="width:90px;">Variance</th>
-      <th class="tbl-th" style="width:110px;">Achievement %</th>
-      <th class="tbl-th" style="width:100px;">Downtime (Min)</th>
-      <th class="tbl-th" style="width:140px;">Responsible Dept</th>
-      <th class="tbl-th" style="width:180px;">Downtime Reason</th>
-      <th class="tbl-th" style="width:80px;">Reloads</th>
-      <th class="tbl-th" style="width:90px;">Manpower</th>
-    </tr>
-    ${hourlyRowsHtml}
-  </table>
+  const buildWorksheet = (ws, titleSuffix, subLabel, days, isConsolidated) => {
+    ws.views = [{ showGridLines: true }];
+    ws.columns = [
+      { width: 7 },   // A: Sr No
+      { width: 13 },  // B: Date
+      { width: 14 },  // C: Time Slot
+      { width: 12 },  // D: Target
+      { width: 12 },  // E: Actual
+      { width: 12 },  // F: Variance
+      { width: 14 },  // G: Ach %
+      { width: 13 },  // H: Downtime
+      { width: 16 },  // I: Dept
+      { width: 24 },  // J: Reason
+      { width: 10 },  // K: Reloads
+      { width: 12 },  // L: Manpower
+    ];
 
-  <!-- SECTION 2: SCANNED SERIAL NUMBERS -->
-  <table>
-    <tr>
-      <th colspan="7" class="sec-bar">🔢 SECTION 2: UNIT SERIAL NUMBER TRACEABILITY REGISTER (${serialCount} RECORDS)</th>
-    </tr>
-    <tr>
-      <th class="tbl-th" style="width:60px;">Sr. No.</th>
-      <th class="tbl-th" style="width:110px;">Production Date</th>
-      <th class="tbl-th" style="width:130px;">Time Slot</th>
-      <th class="tbl-th" style="width:150px;">Model Number</th>
-      <th class="tbl-th" style="width:220px;">Barcode / Serial Number</th>
-      <th class="tbl-th" style="width:180px;">Scan Timestamp (IST)</th>
-      <th class="tbl-th" style="width:140px;">Inspection Status</th>
-    </tr>
-    ${serialRowsHtml}
-  </table>
+    let r = 1;
 
-  <!-- SECTION 3: IDLE TIME AUDIT -->
-  <table>
-    <tr>
-      <th colspan="8" class="sec-bar" style="background-color:#991b1b;">⏱ SECTION 3: LINE STOPPAGE & DOWNTIME AUDIT REGISTER (${idleCount} INCIDENTS, ${totalIdle} MINS)</th>
-    </tr>
-    <tr>
-      <th class="tbl-th" style="width:60px;">Sr. No.</th>
-      <th class="tbl-th" style="width:110px;">Incident Date</th>
-      <th class="tbl-th" style="width:130px;">Time Slot</th>
-      <th class="tbl-th" style="width:100px;">From Time</th>
-      <th class="tbl-th" style="width:100px;">To Time</th>
-      <th class="tbl-th" style="width:110px;">Duration (Min)</th>
-      <th class="tbl-th" style="width:160px;">Department</th>
-      <th class="tbl-th" style="width:240px;">Root Cause / Reason</th>
-    </tr>
-    ${idleRowsHtml}
-  </table>
+    // 1. Header Banner
+    ws.mergeCells(`A${r}:L${r}`);
+    const c1 = ws.getCell(`A${r}`);
+    c1.value = "PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM";
+    styleCell(c1, { bg: "FF0F172A", color: "FFFFFFFF", bold: true, size: 13, align: "center", border: null });
+    ws.getRow(r).height = 28;
+    r++;
 
-  <!-- SECTION 4: RELOADS & RESCANS -->
-  <table>
-    <tr>
-      <th colspan="6" class="sec-bar" style="background-color:#d97706;">🔄 SECTION 4: MATERIAL RELOAD & RESCAN AUDIT REGISTER (${reloadCount} EVENTS)</th>
-    </tr>
-    <tr>
-      <th class="tbl-th" style="width:60px;">Sr. No.</th>
-      <th class="tbl-th" style="width:110px;">Record Date</th>
-      <th class="tbl-th" style="width:130px;">Time Slot</th>
-      <th class="tbl-th" style="width:180px;">Component / Type</th>
-      <th class="tbl-th" style="width:110px;">Reload Count</th>
-      <th class="tbl-th" style="width:180px;">Timestamp</th>
-    </tr>
-    ${reloadRowsHtml}
-  </table>
+    // 2. Subtitle
+    ws.mergeCells(`A${r}:L${r}`);
+    const c2 = ws.getCell(`A${r}`);
+    c2.value = `ATOMBERG ASSEMBLY & PACKAGING LINE — ${titleSuffix.toUpperCase()}`;
+    styleCell(c2, { bg: "FF1E293B", color: "FF93C5FD", bold: true, size: 10, align: "center", border: null });
+    ws.getRow(r).height = 22;
+    r++;
 
-  ${missingCount > 0 ? `
-  <!-- SECTION 5: MISSING SERIALS -->
-  <table>
-    <tr>
-      <th colspan="6" class="sec-bar" style="background-color:#475569;">🔍 SECTION 5: MISSING SERIAL NUMBERS AUDIT (${missingCount} RECORDS)</th>
-    </tr>
-    <tr>
-      <th class="tbl-th" style="width:60px;">Sr. No.</th>
-      <th class="tbl-th" style="width:110px;">Production Date</th>
-      <th class="tbl-th" style="width:150px;">Model Number</th>
-      <th class="tbl-th" style="width:160px;">Configured Range</th>
-      <th class="tbl-th" style="width:180px;">Missing Serial Number</th>
-      <th class="tbl-th" style="width:150px;">Audit Status</th>
-    </tr>
-    ${missingRowsHtml}
-  </table>` : ''}
-</body>
-</html>
-  `;
+    // 3. Metadata Header
+    ws.mergeCells(`A${r}:L${r}`);
+    const cMeta = ws.getCell(`A${r}`);
+    cMeta.value = "📋 REPORT PARAMETERS & EXECUTIVE SUMMARY";
+    styleCell(cMeta, { bg: "FF1E3A8A", color: "FFFFFFFF", bold: true, size: 10.5, align: "left", border: null });
+    ws.getRow(r).height = 22;
+    r++;
 
-  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    // Metadata Details
+    ws.mergeCells(`A${r}:C${r}`);
+    ws.getCell(`A${r}`).value = "Date / Period:";
+    styleCell(ws.getCell(`A${r}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, align: "left" });
+    ws.mergeCells(`D${r}:F${r}`);
+    ws.getCell(`D${r}`).value = subLabel;
+    styleCell(ws.getCell(`D${r}`), { bg: "FFFFFFFF", color: "FF0F172A", bold: true, align: "left" });
+
+    ws.mergeCells(`G${r}:I${r}`);
+    ws.getCell(`G${r}`).value = "Shift Operating Window:";
+    styleCell(ws.getCell(`G${r}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, align: "left" });
+    ws.mergeCells(`J${r}:L${r}`);
+    ws.getCell(`J${r}`).value = "Full Day Shift (07:00 - 19:00 IST)";
+    styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF0F172A", bold: true, align: "left" });
+    ws.getRow(r).height = 20;
+    r++;
+
+    ws.mergeCells(`A${r}:C${r}`);
+    ws.getCell(`A${r}`).value = "Report Generated At:";
+    styleCell(ws.getCell(`A${r}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, align: "left" });
+    ws.mergeCells(`D${r}:F${r}`);
+    ws.getCell(`D${r}`).value = meta.generatedAt;
+    styleCell(ws.getCell(`D${r}`), { bg: "FFFFFFFF", color: "FF0F172A", bold: true, align: "left" });
+
+    ws.mergeCells(`G${r}:I${r}`);
+    ws.getCell(`G${r}`).value = "Industrial Line Status:";
+    styleCell(ws.getCell(`G${r}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, align: "left" });
+    ws.mergeCells(`J${r}:L${r}`);
+    ws.getCell(`J${r}`).value = "LIVE AUDIT VERIFIED ✓";
+    styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF16A34A", bold: true, align: "left" });
+    ws.getRow(r).height = 20;
+    r++;
+
+    // Calculate aggregated metrics for this tab
+    const allSerials = days.flatMap(d => d.serials || []);
+    const allIdles = days.flatMap(d => d.idles || []);
+    const allReloads = days.flatMap(d => d.reloads || []);
+    const totalProd = allSerials.length;
+    const totalIdle = allIdles.reduce((a, itm) => a + (itm.duration || 0), 0);
+    const totalReloads = allReloads.reduce((a, itm) => a + (itm.count || 1), 0);
+    let totalTarget = 0;
+    days.forEach(d => { (d.hourly || []).forEach(h => { totalTarget += (h.target || 0); }); });
+    const achPercent = totalTarget > 0 ? ((totalProd / totalTarget) * 100).toFixed(1) : "0.0";
+    const avgMP = (days.reduce((a, d) => a + (d.manpower || 0), 0) / Math.max(1, days.length)).toFixed(1);
+
+    // 4. KPI Summary Cards
+    const k1 = r;
+    ws.mergeCells(`A${k1}:B${k1}`);
+    ws.getCell(`A${k1}`).value = "TOTAL PRODUCTION";
+    styleCell(ws.getCell(`A${k1}`), { bg: "FFEFF6FF", color: "FF1E40AF", bold: true, size: 8.5 });
+
+    ws.mergeCells(`C${k1}:D${k1}`);
+    ws.getCell(`C${k1}`).value = "PLANNED TARGET";
+    styleCell(ws.getCell(`C${k1}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, size: 8.5 });
+
+    ws.mergeCells(`E${k1}:F${k1}`);
+    ws.getCell(`E${k1}`).value = "LINE ACHIEVEMENT";
+    styleCell(ws.getCell(`E${k1}`), { bg: "FFF0FDF4", color: "FF166534", bold: true, size: 8.5 });
+
+    ws.mergeCells(`G${k1}:H${k1}`);
+    ws.getCell(`G${k1}`).value = "TOTAL DOWNTIME";
+    styleCell(ws.getCell(`G${k1}`), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, size: 8.5 });
+
+    ws.mergeCells(`I${k1}:J${k1}`);
+    ws.getCell(`I${k1}`).value = "TOTAL RELOADS";
+    styleCell(ws.getCell(`I${k1}`), { bg: "FFFFFBEB", color: "FF92400E", bold: true, size: 8.5 });
+
+    ws.mergeCells(`K${k1}:L${k1}`);
+    ws.getCell(`K${k1}`).value = "MANPOWER";
+    styleCell(ws.getCell(`K${k1}`), { bg: "FFF5F3FF", color: "FF6D28D9", bold: true, size: 8.5 });
+    ws.getRow(k1).height = 18;
+    r++;
+
+    const k2 = r;
+    ws.mergeCells(`A${k2}:B${k2}`);
+    ws.getCell(`A${k2}`).value = `${totalProd.toLocaleString()} Units`;
+    styleCell(ws.getCell(`A${k2}`), { bg: "FFEFF6FF", color: "FF1D4ED8", bold: true, size: 12 });
+
+    ws.mergeCells(`C${k2}:D${k2}`);
+    ws.getCell(`C${k2}`).value = `${totalTarget.toLocaleString()} Units`;
+    styleCell(ws.getCell(`C${k2}`), { bg: "FFF1F5F9", color: "FF0F172A", bold: true, size: 12 });
+
+    ws.mergeCells(`E${k2}:F${k2}`);
+    const achValColor = parseFloat(achPercent) >= 90 ? "FF16A34A" : parseFloat(achPercent) >= 60 ? "FFD97706" : "FFDC2626";
+    ws.getCell(`E${k2}`).value = `${achPercent}%`;
+    styleCell(ws.getCell(`E${k2}`), { bg: "FFF0FDF4", color: achValColor, bold: true, size: 13 });
+
+    ws.mergeCells(`G${k2}:H${k2}`);
+    ws.getCell(`G${k2}`).value = `${totalIdle} Min (${(totalIdle/60).toFixed(1)}h)`;
+    styleCell(ws.getCell(`G${k2}`), { bg: "FFFEE2E2", color: "FFDC2626", bold: true, size: 12 });
+
+    ws.mergeCells(`I${k2}:J${k2}`);
+    ws.getCell(`I${k2}`).value = `${totalReloads}`;
+    styleCell(ws.getCell(`I${k2}`), { bg: "FFFFFBEB", color: "FFB45309", bold: true, size: 12 });
+
+    ws.mergeCells(`K${k2}:L${k2}`);
+    ws.getCell(`K${k2}`).value = `${avgMP}`;
+    styleCell(ws.getCell(`K${k2}`), { bg: "FFF5F3FF", color: "FF7C3AED", bold: true, size: 12 });
+    ws.getRow(k2).height = 26;
+    r++;
+
+    // Blank row
+    r++;
+
+    // 5. SECTION 1: Hourly Production Register
+    ws.mergeCells(`A${r}:L${r}`);
+    const s1Hdr = ws.getCell(`A${r}`);
+    s1Hdr.value = "📊 SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER";
+    styleCell(s1Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
+    ws.getRow(r).height = 22;
+    r++;
+
+    const s1ThCols = ["Sr. No.", "Date", "Time Slot", "Target", "Actual", "Variance", "Achievement %", "Downtime (Min)", "Responsible Dept", "Downtime Reason", "Reloads", "Manpower"];
+    s1ThCols.forEach((colName, cIdx) => {
+      const cell = ws.getRow(r).getCell(cIdx + 1);
+      cell.value = colName;
+      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+    });
+    ws.getRow(r).height = 22;
+    r++;
+
+    let hSr = 1;
+    days.forEach(d => {
+      (d.hourly || []).forEach(h => {
+        const row = ws.getRow(r);
+        const achNum = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+        const achBg = achNum >= 90 ? "FFDCFCE7" : achNum >= 60 ? "FFFEF3C7" : "FFFEE2E2";
+        const achColor = achNum >= 90 ? "FF166534" : achNum >= 60 ? "FF92400E" : "FF991B1B";
+        const variance = (h.prod || 0) - (h.target || 0);
+        const varColor = variance > 0 ? "FF16A34A" : variance < 0 ? "FFDC2626" : "FF64748B";
+        const isOdd = hSr % 2 !== 0;
+        const rowBg = isOdd ? "FFF8FAFC" : "FFFFFFFF";
+
+        row.getCell(1).value = hSr++;
+        styleCell(row.getCell(1), { bg: rowBg, align: "center" });
+
+        row.getCell(2).value = d.date;
+        styleCell(row.getCell(2), { bg: rowBg, bold: true, align: "center" });
+
+        row.getCell(3).value = h.slot;
+        styleCell(row.getCell(3), { bg: rowBg, color: "FF1E3A8A", bold: true, align: "center" });
+
+        row.getCell(4).value = h.target || 0;
+        styleCell(row.getCell(4), { bg: rowBg, align: "center" });
+
+        row.getCell(5).value = h.prod || 0;
+        styleCell(row.getCell(5), { bg: rowBg, color: "FF1D4ED8", bold: true, align: "center" });
+
+        row.getCell(6).value = variance > 0 ? `+${variance}` : `${variance}`;
+        styleCell(row.getCell(6), { bg: rowBg, color: varColor, bold: true, align: "center" });
+
+        row.getCell(7).value = `${achNum}%`;
+        styleCell(row.getCell(7), { bg: achBg, color: achColor, bold: true, align: "center" });
+
+        row.getCell(8).value = h.idle || 0;
+        styleCell(row.getCell(8), { bg: rowBg, color: (h.idle || 0) > 0 ? "FFDC2626" : "FF0F172A", bold: (h.idle || 0) > 0, align: "center" });
+
+        row.getCell(9).value = h.dept || "-";
+        styleCell(row.getCell(9), { bg: rowBg, align: "left" });
+
+        row.getCell(10).value = h.reason || "-";
+        styleCell(row.getCell(10), { bg: rowBg, align: "left" });
+
+        row.getCell(11).value = h.reloads || 0;
+        styleCell(row.getCell(11), { bg: rowBg, align: "center" });
+
+        row.getCell(12).value = d.manpower || 0;
+        styleCell(row.getCell(12), { bg: rowBg, align: "center" });
+
+        row.height = 19;
+        r++;
+      });
+    });
+
+    // Grand Total Row for Section 1
+    const totRow = ws.getRow(r);
+    ws.mergeCells(`A${r}:C${r}`);
+    totRow.getCell(1).value = isConsolidated ? `GRAND TOTAL (${days.length} DAYS)` : `DAILY TOTAL (${days[0]?.date || ""})`;
+    styleCell(totRow.getCell(1), { bg: "FFE2E8F0", color: "FF0F172A", bold: true, size: 10.5, align: "center", border: totalBorder });
+
+    totRow.getCell(4).value = totalTarget;
+    styleCell(totRow.getCell(4), { bg: "FFE2E8F0", bold: true, align: "center", border: totalBorder });
+
+    totRow.getCell(5).value = totalProd;
+    styleCell(totRow.getCell(5), { bg: "FFE2E8F0", color: "FF1D4ED8", bold: true, align: "center", border: totalBorder });
+
+    const netVar = totalProd - totalTarget;
+    totRow.getCell(6).value = netVar > 0 ? `+${netVar}` : `${netVar}`;
+    styleCell(totRow.getCell(6), { bg: "FFE2E8F0", color: netVar > 0 ? "FF16A34A" : netVar < 0 ? "FFDC2626" : "FF64748B", bold: true, align: "center", border: totalBorder });
+
+    totRow.getCell(7).value = `${achPercent}%`;
+    styleCell(totRow.getCell(7), { bg: parseFloat(achPercent) >= 90 ? "FFDCFCE7" : "FFE2E8F0", color: achValColor, bold: true, align: "center", border: totalBorder });
+
+    totRow.getCell(8).value = totalIdle;
+    styleCell(totRow.getCell(8), { bg: "FFE2E8F0", color: "FFDC2626", bold: true, align: "center", border: totalBorder });
+
+    totRow.getCell(9).value = "-";
+    styleCell(totRow.getCell(9), { bg: "FFE2E8F0", align: "center", border: totalBorder });
+
+    totRow.getCell(10).value = "-";
+    styleCell(totRow.getCell(10), { bg: "FFE2E8F0", align: "center", border: totalBorder });
+
+    totRow.getCell(11).value = totalReloads;
+    styleCell(totRow.getCell(11), { bg: "FFE2E8F0", bold: true, align: "center", border: totalBorder });
+
+    totRow.getCell(12).value = avgMP;
+    styleCell(totRow.getCell(12), { bg: "FFE2E8F0", color: "FF7C3AED", bold: true, align: "center", border: totalBorder });
+    totRow.height = 22;
+    r++;
+
+    // Blank row
+    r++;
+
+    // 6. SECTION 2: Scanned Serials Register
+    ws.mergeCells(`A${r}:G${r}`);
+    const s2Hdr = ws.getCell(`A${r}`);
+    s2Hdr.value = `🔢 SECTION 2: UNIT SERIAL NUMBER TRACEABILITY REGISTER (${allSerials.length} RECORDS)`;
+    styleCell(s2Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
+    ws.getRow(r).height = 22;
+    r++;
+
+    const s2ThCols = ["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"];
+    s2ThCols.forEach((colName, cIdx) => {
+      const cell = ws.getRow(r).getCell(cIdx + 1);
+      cell.value = colName;
+      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+    });
+    ws.getRow(r).height = 22;
+    r++;
+
+    allSerials.forEach((s, idx) => {
+      const row = ws.getRow(r);
+      const sIdx = tsToSlot(s.ts);
+      const isOdd = idx % 2 !== 0;
+      const rowBg = isOdd ? "FFF8FAFC" : "FFFFFFFF";
+
+      row.getCell(1).value = idx + 1;
+      styleCell(row.getCell(1), { bg: rowBg, align: "center" });
+
+      row.getCell(2).value = s.date;
+      styleCell(row.getCell(2), { bg: rowBg, bold: true, align: "center" });
+
+      row.getCell(3).value = sIdx >= 0 ? SLOTS[sIdx] : "-";
+      styleCell(row.getCell(3), { bg: rowBg, color: "FF1E3A8A", align: "center" });
+
+      row.getCell(4).value = s.model;
+      styleCell(row.getCell(4), { bg: rowBg, bold: true, align: "center" });
+
+      row.getCell(5).value = s.serial;
+      styleCell(row.getCell(5), { bg: rowBg, bold: true, align: "center" });
+
+      row.getCell(6).value = s.ts;
+      styleCell(row.getCell(6), { bg: rowBg, color: "FF475569", align: "center" });
+
+      row.getCell(7).value = "PASSED ✓";
+      styleCell(row.getCell(7), { bg: "FFDCFCE7", color: "FF166534", bold: true, align: "center" });
+
+      row.height = 18;
+      r++;
+    });
+
+    // Blank row
+    r++;
+
+    // 7. SECTION 3: Line Stoppage & Idle Time Register
+    ws.mergeCells(`A${r}:H${r}`);
+    const s3Hdr = ws.getCell(`A${r}`);
+    s3Hdr.value = `⏱ SECTION 3: LINE STOPPAGE & DOWNTIME AUDIT REGISTER (${allIdles.length} INCIDENTS, ${totalIdle} MINS)`;
+    styleCell(s3Hdr, { bg: "FF991B1B", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
+    ws.getRow(r).height = 22;
+    r++;
+
+    const s3ThCols = ["Sr. No.", "Incident Date", "Time Slot", "From Time", "To Time", "Duration (Min)", "Department", "Root Cause / Reason"];
+    s3ThCols.forEach((colName, cIdx) => {
+      const cell = ws.getRow(r).getCell(cIdx + 1);
+      cell.value = colName;
+      styleCell(cell, { bg: "FFDC2626", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+    });
+    ws.getRow(r).height = 22;
+    r++;
+
+    allIdles.forEach((item, idx) => {
+      const row = ws.getRow(r);
+      const isOdd = idx % 2 !== 0;
+      const rowBg = isOdd ? "FFF8FAFC" : "FFFFFFFF";
+
+      row.getCell(1).value = idx + 1;
+      styleCell(row.getCell(1), { bg: rowBg, align: "center" });
+
+      row.getCell(2).value = item.date;
+      styleCell(row.getCell(2), { bg: rowBg, bold: true, align: "center" });
+
+      row.getCell(3).value = item.slot;
+      styleCell(row.getCell(3), { bg: rowBg, color: "FF1E3A8A", bold: true, align: "center" });
+
+      row.getCell(4).value = item.from || "-";
+      styleCell(row.getCell(4), { bg: rowBg, align: "center" });
+
+      row.getCell(5).value = item.to || "-";
+      styleCell(row.getCell(5), { bg: rowBg, align: "center" });
+
+      row.getCell(6).value = item.duration;
+      styleCell(row.getCell(6), { bg: rowBg, color: "FFDC2626", bold: true, align: "center" });
+
+      row.getCell(7).value = item.dept || "General";
+      styleCell(row.getCell(7), { bg: rowBg, bold: true, align: "left" });
+
+      row.getCell(8).value = item.reason || "Unspecified";
+      styleCell(row.getCell(8), { bg: rowBg, align: "left" });
+
+      row.height = 18;
+      r++;
+    });
+
+    if (allIdles.length > 0) {
+      const idleTotRow = ws.getRow(r);
+      ws.mergeCells(`A${r}:E${r}`);
+      idleTotRow.getCell(1).value = "TOTAL LINE DOWNTIME DURATION";
+      styleCell(idleTotRow.getCell(1), { bg: "FFE2E8F0", bold: true, align: "center", border: totalBorder });
+
+      idleTotRow.getCell(6).value = `${totalIdle} Min (${(totalIdle/60).toFixed(1)}h)`;
+      styleCell(idleTotRow.getCell(6), { bg: "FFE2E8F0", color: "FFDC2626", bold: true, align: "center", border: totalBorder });
+
+      ws.mergeCells(`G${r}:H${r}`);
+      idleTotRow.getCell(7).value = "-";
+      styleCell(idleTotRow.getCell(7), { bg: "FFE2E8F0", align: "center", border: totalBorder });
+      idleTotRow.height = 20;
+      r++;
+    }
+
+    // Blank row
+    r++;
+
+    // 8. SECTION 4: Reloads & Rescans Register
+    ws.mergeCells(`A${r}:F${r}`);
+    const s4Hdr = ws.getCell(`A${r}`);
+    s4Hdr.value = `🔄 SECTION 4: MATERIAL RELOAD & RESCAN AUDIT REGISTER (${allReloads.length} EVENTS)`;
+    styleCell(s4Hdr, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
+    ws.getRow(r).height = 22;
+    r++;
+
+    const s4ThCols = ["Sr. No.", "Record Date", "Time Slot", "Component / Type", "Reload Count", "Timestamp"];
+    s4ThCols.forEach((colName, cIdx) => {
+      const cell = ws.getRow(r).getCell(cIdx + 1);
+      cell.value = colName;
+      styleCell(cell, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+    });
+    ws.getRow(r).height = 22;
+    r++;
+
+    allReloads.forEach((item, idx) => {
+      const row = ws.getRow(r);
+      const isOdd = idx % 2 !== 0;
+      const rowBg = isOdd ? "FFF8FAFC" : "FFFFFFFF";
+
+      row.getCell(1).value = idx + 1;
+      styleCell(row.getCell(1), { bg: rowBg, align: "center" });
+
+      row.getCell(2).value = item.date;
+      styleCell(row.getCell(2), { bg: rowBg, bold: true, align: "center" });
+
+      row.getCell(3).value = item.slot;
+      styleCell(row.getCell(3), { bg: rowBg, color: "FF1E3A8A", bold: true, align: "center" });
+
+      row.getCell(4).value = item.type;
+      styleCell(row.getCell(4), { bg: rowBg, bold: true, align: "left" });
+
+      row.getCell(5).value = item.count;
+      styleCell(row.getCell(5), { bg: rowBg, color: "FFB45309", bold: true, align: "center" });
+
+      row.getCell(6).value = item.ts || "-";
+      styleCell(row.getCell(6), { bg: rowBg, color: "FF475569", align: "center" });
+
+      row.height = 18;
+      r++;
+    });
+
+    if (allReloads.length > 0) {
+      const rldTotRow = ws.getRow(r);
+      ws.mergeCells(`A${r}:D${r}`);
+      rldTotRow.getCell(1).value = "TOTAL RELOAD / RESCAN EVENTS";
+      styleCell(rldTotRow.getCell(1), { bg: "FFE2E8F0", bold: true, align: "center", border: totalBorder });
+
+      rldTotRow.getCell(5).value = `${totalReloads}`;
+      styleCell(rldTotRow.getCell(5), { bg: "FFE2E8F0", color: "FFB45309", bold: true, align: "center", border: totalBorder });
+
+      rldTotRow.getCell(6).value = "-";
+      styleCell(rldTotRow.getCell(6), { bg: "FFE2E8F0", align: "center", border: totalBorder });
+      rldTotRow.height = 20;
+      r++;
+    }
+
+    // Blank row
+    r++;
+
+    // 9. SECTION 5: Missing Serials (if any)
+    const missingList = [];
+    days.forEach(d => {
+      if (!d.sRange?.model || !d.sRange.start || !d.sRange.end) return;
+      const scannedSet = new Set();
+      (d.serials || []).forEach(s => {
+        if (s.model !== d.sRange.model) return;
+        const n = extractNum(s.serial);
+        if (n !== null && n >= d.sRange.start && n <= d.sRange.end) scannedSet.add(n);
+      });
+      for (let i = d.sRange.start; i <= d.sRange.end; i++) {
+        if (!scannedSet.has(i)) {
+          missingList.push({ date: d.date, model: d.sRange.model, serial: pad5(i), range: `${d.sRange.start} - ${d.sRange.end}` });
+        }
+      }
+    });
+
+    if (missingList.length > 0) {
+      ws.mergeCells(`A${r}:F${r}`);
+      const s5Hdr = ws.getCell(`A${r}`);
+      s5Hdr.value = `🔍 SECTION 5: MISSING SERIAL NUMBERS AUDIT (${missingList.length} RECORDS)`;
+      styleCell(s5Hdr, { bg: "FF475569", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
+      ws.getRow(r).height = 22;
+      r++;
+
+      const s5ThCols = ["Sr. No.", "Production Date", "Model Number", "Configured Range", "Missing Serial Number", "Audit Status"];
+      s5ThCols.forEach((colName, cIdx) => {
+        const cell = ws.getRow(r).getCell(cIdx + 1);
+        cell.value = colName;
+        styleCell(cell, { bg: "FF64748B", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+      });
+      ws.getRow(r).height = 22;
+      r++;
+
+      missingList.forEach((m, idx) => {
+        const row = ws.getRow(r);
+        const isOdd = idx % 2 !== 0;
+        const rowBg = isOdd ? "FFF8FAFC" : "FFFFFFFF";
+
+        row.getCell(1).value = idx + 1;
+        styleCell(row.getCell(1), { bg: rowBg, align: "center" });
+
+        row.getCell(2).value = m.date;
+        styleCell(row.getCell(2), { bg: rowBg, bold: true, align: "center" });
+
+        row.getCell(3).value = m.model;
+        styleCell(row.getCell(3), { bg: rowBg, bold: true, align: "center" });
+
+        row.getCell(4).value = m.range;
+        styleCell(row.getCell(4), { bg: rowBg, align: "center" });
+
+        row.getCell(5).value = m.serial;
+        styleCell(row.getCell(5), { bg: rowBg, color: "FFDC2626", bold: true, align: "center" });
+
+        row.getCell(6).value = "MISSING / UNSCANNED";
+        styleCell(row.getCell(6), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, align: "center" });
+
+        row.height = 18;
+        r++;
+      });
+    }
+  };
+
+  // 1. Build Tab 1: Consolidated Summary
+  const wsMain = wb.addWorksheet("Consolidated Summary");
+  buildWorksheet(
+    wsMain,
+    "Consolidated Executive Audit",
+    `${meta.sDate} to ${meta.eDate} (${allDaysData.length} Days)`,
+    allDaysData,
+    true
+  );
+
+  // 2. Build Date Tabs (e.g. 2026-08-19, 2026-08-20...)
+  allDaysData.forEach(day => {
+    const tabName = String(day.date || "Day").replace(/[\\/?*:[\]]/g, "-").slice(0, 31);
+    const wsDay = wb.addWorksheet(tabName);
+    buildWorksheet(
+      wsDay,
+      `Daily Performance Audit — ${day.date}`,
+      `${day.date} (Full Day Operations)`,
+      [day],
+      false
+    );
+  });
+
+  // Write buffer and trigger browser download
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename.endsWith(".xls") ? filename : `${filename}.xls`;
+  a.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2385,202 +2733,17 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
         });
       }
 
-      setExportProgress("Formatting Industrial Excel Report...");
+      setExportProgress("Generating Multi-Tab Excel Workbook...");
 
       const isSingleDay = sDate === eDate;
       const dateRangeLabel = isSingleDay ? sDate : `${sDate}_to_${eDate}`;
-
-      const allSerialsList = allDaysData.flatMap(day => day.serials);
-      const allIdlesList = allDaysData.flatMap(day => day.idles);
-      const allReloadsList = allDaysData.flatMap(day => day.reloads);
-
-      const totalProdCount = allSerialsList.length;
-      const totalIdleMins = allIdlesList.reduce((a, r) => a + (r.duration || 0), 0);
-      const totalReloadsCount = allReloadsList.reduce((a, r) => a + (r.count || 1), 0);
-
-      let totalTargetCount = 0;
-      allDaysData.forEach(day => {
-        day.hourly.forEach(h => {
-          totalTargetCount += (h.target || 0);
-        });
-      });
-      const overallAch = totalTargetCount > 0 ? ((totalProdCount / totalTargetCount) * 100).toFixed(2) : "0.00";
-      const avgManpower = (allDaysData.reduce((a, d) => a + (d.manpower || 0), 0) / Math.max(1, allDaysData.length)).toFixed(1);
-
       const nowIST = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST";
 
-      // 1. Format Hourly Performance Rows with Color Coding
-      let hourlyRowsHtml = "";
-      let hRowIndex = 1;
-      allDaysData.forEach(day => {
-        day.hourly.forEach(h => {
-          const achNum = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
-          const achBadgeClass = achNum >= 90 ? "badge-ok" : achNum >= 60 ? "badge-warn" : "badge-bad";
-          const variance = (h.prod || 0) - (h.target || 0);
-          const varClass = variance > 0 ? "num-pos" : variance < 0 ? "num-neg" : "num-zero";
-          const rowClass = (hRowIndex % 2 === 0) ? "row-even" : "row-odd";
-
-          hourlyRowsHtml += `
-            <tr class="${rowClass}">
-              <td class="text-c">${hRowIndex++}</td>
-              <td class="text-c"><strong>${day.date}</strong></td>
-              <td class="text-c" style="font-weight:600;color:#1e3a8a;">${h.slot}</td>
-              <td class="text-c" style="font-weight:600;">${(h.target || 0).toLocaleString()}</td>
-              <td class="text-c" style="font-weight:700;color:#1d4ed8;">${(h.prod || 0).toLocaleString()}</td>
-              <td class="text-c ${varClass}">${variance > 0 ? `+${variance}` : variance}</td>
-              <td class="${achBadgeClass}">${achNum}%</td>
-              <td class="text-c" style="${(h.idle||0)>0?'color:#dc2626;font-weight:bold;':''}">${h.idle || 0}</td>
-              <td class="text-l">${h.dept || "-"}</td>
-              <td class="text-l">${h.reason || "-"}</td>
-              <td class="text-c">${h.reloads || 0}</td>
-              <td class="text-c" style="font-weight:600;">${day.manpower || 0}</td>
-            </tr>
-          `;
-        });
-      });
-
-      const varTotal = totalProdCount - totalTargetCount;
-      const varTotalClass = varTotal > 0 ? "num-pos" : varTotal < 0 ? "num-neg" : "num-zero";
-      const achTotalNum = parseFloat(overallAch) || 0;
-      const achTotalBadge = achTotalNum >= 90 ? "badge-ok" : achTotalNum >= 60 ? "badge-warn" : "badge-bad";
-
-      hourlyRowsHtml += `
-        <tr class="tot-row">
-          <td class="tot-lbl" colspan="3">GRAND TOTAL (${dates.length} Days)</td>
-          <td class="text-c" style="font-weight:bold;font-size:11pt;">${totalTargetCount.toLocaleString()}</td>
-          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#1d4ed8;">${totalProdCount.toLocaleString()}</td>
-          <td class="text-c ${varTotalClass}" style="font-size:11pt;">${varTotal > 0 ? `+${varTotal}` : varTotal}</td>
-          <td class="${achTotalBadge}" style="font-size:11pt;">${overallAch}%</td>
-          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#dc2626;">${totalIdleMins}</td>
-          <td class="text-c">-</td>
-          <td class="text-c">-</td>
-          <td class="text-c" style="font-weight:bold;font-size:11pt;">${totalReloadsCount}</td>
-          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#7c3aed;">${avgManpower}</td>
-        </tr>
-      `;
-
-      // 2. Format Serial Rows
-      let serialRowsHtml = "";
-      allSerialsList.forEach((s, idx) => {
-        const sIdx = tsToSlot(s.ts);
-        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
-        serialRowsHtml += `
-          <tr class="${rowClass}">
-            <td class="text-c">${idx + 1}</td>
-            <td class="text-c"><strong>${s.date}</strong></td>
-            <td class="text-c" style="color:#1e3a8a;">${sIdx >= 0 ? SLOTS[sIdx] : "-"}</td>
-            <td class="text-c" style="font-weight:600;">${s.model}</td>
-            <td class="text-c mono" style="color:#0f172a;font-weight:700;">${s.serial}</td>
-            <td class="text-c" style="color:#475569;">${s.ts}</td>
-            <td class="badge-ok">PASSED ✓</td>
-          </tr>
-        `;
-      });
-
-      // 3. Format Idle Rows
-      let idleRowsHtml = "";
-      allIdlesList.forEach((r, idx) => {
-        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
-        idleRowsHtml += `
-          <tr class="${rowClass}">
-            <td class="text-c">${idx + 1}</td>
-            <td class="text-c"><strong>${r.date}</strong></td>
-            <td class="text-c" style="color:#1e3a8a;font-weight:600;">${r.slot}</td>
-            <td class="text-c">${r.from || "-"}</td>
-            <td class="text-c">${r.to || "-"}</td>
-            <td class="text-c" style="font-weight:bold;color:#dc2626;">${r.duration}</td>
-            <td class="text-l" style="font-weight:600;">${r.dept || "General"}</td>
-            <td class="text-l">${r.reason || "Unspecified"}</td>
-          </tr>
-        `;
-      });
-      if (allIdlesList.length > 0) {
-        idleRowsHtml += `
-          <tr class="tot-row">
-            <td class="tot-lbl" colspan="5">TOTAL DOWNTIME DURATION</td>
-            <td class="text-c" style="font-weight:bold;color:#dc2626;font-size:11pt;">${totalIdleMins} Min (${(totalIdleMins/60).toFixed(1)}h)</td>
-            <td colspan="2">-</td>
-          </tr>
-        `;
-      }
-
-      // 4. Format Reload Rows
-      let reloadRowsHtml = "";
-      allReloadsList.forEach((r, idx) => {
-        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
-        reloadRowsHtml += `
-          <tr class="${rowClass}">
-            <td class="text-c">${idx + 1}</td>
-            <td class="text-c"><strong>${r.date}</strong></td>
-            <td class="text-c" style="color:#1e3a8a;font-weight:600;">${r.slot}</td>
-            <td class="text-l" style="font-weight:600;">${r.type}</td>
-            <td class="text-c" style="font-weight:bold;color:#b45309;">${r.count}</td>
-            <td class="text-c" style="color:#475569;">${r.ts || "-"}</td>
-          </tr>
-        `;
-      });
-      if (allReloadsList.length > 0) {
-        reloadRowsHtml += `
-          <tr class="tot-row">
-            <td class="tot-lbl" colspan="4">TOTAL RELOAD / RESCAN EVENTS</td>
-            <td class="text-c" style="font-weight:bold;color:#b45309;font-size:11pt;">${totalReloadsCount}</td>
-            <td>-</td>
-          </tr>
-        `;
-      }
-
-      // 5. Format Missing Serials
-      const missingList = [];
-      allDaysData.forEach(day => {
-        if (!day.sRange?.model || !day.sRange.start || !day.sRange.end) return;
-        const scannedSet = new Set();
-        day.serials.forEach(s => {
-          if (s.model !== day.sRange.model) return;
-          const n = extractNum(s.serial);
-          if (n !== null && n >= day.sRange.start && n <= day.sRange.end) scannedSet.add(n);
-        });
-        for (let i = day.sRange.start; i <= day.sRange.end; i++) {
-          if (!scannedSet.has(i)) {
-            missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i), range: `${day.sRange.start} - ${day.sRange.end}` });
-          }
-        }
-      });
-
-      let missingRowsHtml = "";
-      missingList.forEach((m, idx) => {
-        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
-        missingRowsHtml += `
-          <tr class="${rowClass}">
-            <td class="text-c">${idx + 1}</td>
-            <td class="text-c"><strong>${m.date}</strong></td>
-            <td class="text-c" style="font-weight:600;">${m.model}</td>
-            <td class="text-c">${m.range}</td>
-            <td class="text-c mono" style="color:#dc2626;font-weight:bold;">${m.serial}</td>
-            <td class="badge-bad">MISSING / UNSCANNED</td>
-          </tr>
-        `;
-      });
-
-      dlIndustrialExcel(`Atomberg_Industrial_Report_${dateRangeLabel}.xls`, {
+      await exportMultiTabExcel(`Atomberg_Industrial_Report_${dateRangeLabel}.xlsx`, allDaysData, {
         sDate,
         eDate,
         dateCount: dates.length,
         generatedAt: nowIST,
-        totalProd: totalProdCount,
-        totalTarget: totalTargetCount,
-        overallAch,
-        totalIdle: totalIdleMins,
-        totalReloads: totalReloadsCount,
-        avgManpower,
-        hourlyRowsHtml,
-        serialRowsHtml,
-        serialCount: allSerialsList.length,
-        idleRowsHtml,
-        idleCount: allIdlesList.length,
-        reloadRowsHtml,
-        reloadCount: allReloadsList.length,
-        missingRowsHtml,
-        missingCount: missingList.length,
       });
 
       setShowExportModal(false);
