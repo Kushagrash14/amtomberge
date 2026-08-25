@@ -333,11 +333,20 @@ const handlers = {
   },
 
   async serverUpdateUser(body) {
-    const email = normalizeEmail(body.email);
-    if (!email) return { success: false, message: 'Email is required' };
+    const originalEmail = normalizeEmail(body.originalEmail || body.oldEmail || body.email);
+    const newEmail = normalizeEmail(body.email || body.newEmail || originalEmail);
+    if (!originalEmail) return { success: false, message: 'Email is required' };
 
-    const user = await userModel.findOne({ email });
+    const user = await userModel.findOne({ email: originalEmail });
     if (!user) return { success: false, message: 'User not found' };
+
+    if (newEmail && newEmail !== originalEmail) {
+      const existing = await userModel.findOne({ email: newEmail });
+      if (existing && String(existing.id) !== String(user.id)) {
+        return { success: false, message: 'A user with this new email already exists' };
+      }
+      user.email = newEmail;
+    }
 
     if (body.name || body.username) {
       const uname = String(body.name || body.username).trim();

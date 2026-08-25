@@ -403,19 +403,39 @@ export const addUser = async (req, res) => {
 };
 
 // PUT /api/production/users
-// body: { email, name, role }
+// body: { originalEmail, email, name, role }
 export const updateUser = async (req, res) => {
   try {
-    const { email, name, role } = req.body;
-    if (!email) return err(res, 'email is required');
-    const user = await userModel.findOne({ email: email.trim().toLowerCase() });
+    const originalEmail = (req.body.originalEmail || req.body.oldEmail || req.body.email || '').trim().toLowerCase();
+    const newEmail = (req.body.email || req.body.newEmail || originalEmail).trim().toLowerCase();
+    const { name, role } = req.body;
+
+    if (!originalEmail) return err(res, 'Email is required');
+
+    const user = await userModel.findOne({ email: originalEmail });
     if (!user) return err(res, 'User not found', 404);
-    if (name) { user.name = name.trim(); user.username = name.trim(); }
-    if (role) { user.role = role.trim(); }
+
+    if (newEmail && newEmail !== originalEmail) {
+      const existing = await userModel.findOne({ email: newEmail });
+      if (existing && String(existing.id) !== String(user.id)) {
+        return err(res, 'A user with this new email already exists', 400);
+      }
+      user.email = newEmail;
+    }
+
+    if (name) {
+      user.name = name.trim();
+      user.username = name.trim();
+    }
+    if (role) {
+      user.role = role.trim();
+    }
+
     await user.save();
-    ok(res, { message: 'User updated' });
-  } catch {
-    err(res, 'Failed to update user', 500);
+    ok(res, { message: 'User updated successfully' });
+  } catch (e) {
+    console.error('updateUser error:', e);
+    err(res, e?.message || 'Failed to update user', 500);
   }
 };
 

@@ -93,7 +93,12 @@ const callServer = async (action, payload = {}) => {
     case "serverAddUser":
       return apiFetch("POST", "/users", { email: payload.email, name: payload.name, role: payload.role });
     case "serverUpdateUser":
-      return apiFetch("PUT", "/users", { email: payload.email, name: payload.name, role: payload.role });
+      return apiFetch("PUT", "/users", {
+        originalEmail: payload.originalEmail || payload.email,
+        email: payload.email,
+        name: payload.name,
+        role: payload.role,
+      });
     case "serverDeleteUser":
       return apiFetch("DELETE", "/users", { email: payload.email });
 
@@ -1294,7 +1299,12 @@ function ProductionMonitor({ onLogout }) {
     if (!uEmail || !uName) { alert("Enter both email and name."); return; }
     const isEdit = !!editingUser;
     const action = isEdit ? "serverUpdateUser" : "serverAddUser";
-    callServer(action, { email: uEmail, name: uName, role: uRole })
+    callServer(action, {
+      originalEmail: editingUser || uEmail,
+      email: uEmail,
+      name: uName,
+      role: uRole
+    })
       .then(res => {
         if (res.success === false) { alert(res.message || "Error saving user."); return; }
         alert(isEdit ? `✅ User updated: ${uName}` : `✅ User added: ${uName}`);
@@ -3162,7 +3172,6 @@ function AdminTab({
               placeholder="user@company.com"
               value={uEmail}
               onChange={e=>setUEmail(e.target.value)}
-              disabled={!!editingUser}
               style={{fontWeight:600}}
             />
           </div>

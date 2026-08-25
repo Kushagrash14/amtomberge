@@ -60,7 +60,7 @@ const ddl = [
     email VARCHAR(255) NOT NULL UNIQUE,
     otp VARCHAR(16) NULL,
     expireOtpAt DATETIME NULL,
-    role ENUM('operator','user','admin','superadmin') NOT NULL DEFAULT 'user',
+    role VARCHAR(64) NOT NULL DEFAULT 'user',
     createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
@@ -144,6 +144,11 @@ export const ensureSchema = async () => {
       const db = getPool();
       for (const statement of ddl) {
         await db.query(statement);
+      }
+      try {
+        await db.query("ALTER TABLE users MODIFY COLUMN role VARCHAR(64) NOT NULL DEFAULT 'user'");
+      } catch {
+        // Table might not exist yet or already altered
       }
     })().catch((error) => {
       schemaReady = undefined;
