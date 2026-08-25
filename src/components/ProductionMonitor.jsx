@@ -1593,7 +1593,7 @@ function DashboardTab({ S, kpi }) {
       </div>
       <div className="tbl-wrap">
         <table>
-          <thead><tr><th>Time Slot</th><th>Production</th><th>Target</th><th>Achievement</th><th>Idle (min)</th><th>Department</th><th>Reloads</th></tr></thead>
+          <thead><tr><th>Time Slot</th><th>Production</th><th>Target</th><th>Achievement</th><th>Idle (min)</th><th>Department</th><th>Reason</th><th>Reloads</th></tr></thead>
           <tbody>
             {(S.hourly||[]).map((h,i)=>{
               const sh  = 7+i;
@@ -1609,6 +1609,7 @@ function DashboardTab({ S, kpi }) {
                   <td><strong style={{color:h.target>0&&sh<=curHr?achCol:"#6b7280"}}>{achStr}</strong></td>
                   <td style={{color:(h.idle||0)>0?"var(--red)":"var(--g600)",fontWeight:600}}>{h.idle||0}</td>
                   <td style={{fontSize:11}}>{h.dept||"—"}</td>
+                  <td style={{fontSize:11,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.reason||"—"}</td>
                   <td>{h.reloads||0}</td>
                 </tr>
               );
@@ -2609,9 +2610,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
                 </div>
               </div>
 
-              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
-                Hourly Breakdown — {reportDate} {selectedSlot && `(Filtered: ${selectedSlot})`}
-              </div>
               <div className="tbl-wrap">
                 <table>
                   <thead>
@@ -2655,9 +2653,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
           {activeReport === "serials" && (
             <div>
-              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
-                Scanned Serial Numbers — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredSerials.length} records)
-              </div>
               {!filteredSerials.length ? (
                 <div className="al al-info">No serial numbers found matching the selected filters.</div>
               ) : (
@@ -2694,9 +2689,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
           {activeReport === "idle" && (
             <div>
-              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
-                Idle Time Analysis — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredIdles.length} records)
-              </div>
               {!filteredIdles.length ? (
                 <div className="al al-ok">No idle time recorded for the selected filter! 🎉</div>
               ) : (
@@ -2777,9 +2769,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
           {activeReport === "reloads" && (
             <div>
-              <div className="sec-title" style={{fontSize:13,marginBottom:8}}>
-                Reloads / Rescans — {reportDate} {selectedSlot && `(${selectedSlot})`} ({filteredReloads.length} records)
-              </div>
               {!filteredReloads.length ? (
                 <div className="al al-info">No reloads recorded for the selected filter.</div>
               ) : (
