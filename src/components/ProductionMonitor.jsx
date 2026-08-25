@@ -1797,7 +1797,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     right: { style: "thin", color: { argb: "FFCBD5E1" } },
   };
 
-  const styleCell = (cell, { bg, color, bold, size = 10, align = "center", border = thinBorder, wrap = false }) => {
+  const styleCell = (cell, { bg, color, bold, size = 9.5, align = "center", border = thinBorder, wrap = false }) => {
     if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
     cell.font = { name: "Segoe UI", size, bold: !!bold, color: { argb: color || "FF0F172A" } };
     cell.alignment = { horizontal: align, vertical: "middle", wrapText: !!wrap };
@@ -1805,20 +1805,23 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
   };
 
   const buildWorksheet = (ws, titleSuffix, subLabel, days, isConsolidated) => {
-    ws.views = [{ showGridLines: true }];
+    ws.views = [{ showGridLines: true, state: "normal", zoomScale: 100 }];
+    ws.pageSetup = { orientation: "landscape", fitToWidth: 1, fitToHeight: 0 };
+    
+    // Perfectly sized columns so entire sheet (Col A to L) fits on 1 screen without horizontal scrolling
     ws.columns = [
-      { width: 8 },   // A: Sr No
-      { width: 14 },  // B: Date (e.g. 2026-08-25)
-      { width: 15 },  // C: Time Slot (e.g. 07:00-08:00)
-      { width: 15 },  // D: Target / Model / Range
-      { width: 28 },  // E: Actual / Barcode Serial Number (e.g. WK26FG0482D00033)
-      { width: 25 },  // F: Variance / Timestamp (e.g. 25/8/2026, 8:03:10 am)
-      { width: 18 },  // G: Ach % / Status (e.g. PASSED ✓)
-      { width: 16 },  // H: Downtime Min
-      { width: 20 },  // I: Responsible Dept
-      { width: 32 },  // J: Downtime Reason
-      { width: 12 },  // K: Reloads
-      { width: 14 },  // L: Manpower
+      { width: 6 },   // A: Sr No
+      { width: 11 },  // B: Date (2026-08-25)
+      { width: 12 },  // C: Time Slot (07:00-08:00)
+      { width: 8 },   // D: Target / Model / Range
+      { width: 22 },  // E: Actual / Barcode Serial (WK26FG0482D00033)
+      { width: 20 },  // F: Variance / Timestamp (25/8/2026, 8:03:10 am)
+      { width: 11 },  // G: Ach % / Status (PASSED ✓ / MISSING)
+      { width: 9 },   // H: Downtime (Min)
+      { width: 11 },  // I: Responsible Dept
+      { width: 16 },  // J: Downtime Reason
+      { width: 8 },   // K: Reloads
+      { width: 8 },   // L: Manpower
     ];
 
     let r = 1;
@@ -1827,24 +1830,24 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`A${r}:L${r}`);
     const c1 = ws.getCell(`A${r}`);
     c1.value = "PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM";
-    styleCell(c1, { bg: "FF0F172A", color: "FFFFFFFF", bold: true, size: 13, align: "center", border: null });
-    ws.getRow(r).height = 30;
+    styleCell(c1, { bg: "FF0F172A", color: "FFFFFFFF", bold: true, size: 12, align: "center", border: null });
+    ws.getRow(r).height = 26;
     r++;
 
     // 2. Subtitle
     ws.mergeCells(`A${r}:L${r}`);
     const c2 = ws.getCell(`A${r}`);
     c2.value = `ATOMBERG ASSEMBLY & PACKAGING LINE — ${titleSuffix.toUpperCase()}`;
-    styleCell(c2, { bg: "FF1E293B", color: "FF93C5FD", bold: true, size: 10, align: "center", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(c2, { bg: "FF1E293B", color: "FF93C5FD", bold: true, size: 9.5, align: "center", border: null });
+    ws.getRow(r).height = 20;
     r++;
 
     // 3. Metadata Header
     ws.mergeCells(`A${r}:L${r}`);
     const cMeta = ws.getCell(`A${r}`);
     cMeta.value = "📋 REPORT PARAMETERS & EXECUTIVE SUMMARY";
-    styleCell(cMeta, { bg: "FF1E3A8A", color: "FFFFFFFF", bold: true, size: 10.5, align: "left", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(cMeta, { bg: "FF1E3A8A", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+    ws.getRow(r).height = 20;
     r++;
 
     // Metadata Details
@@ -1861,7 +1864,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`J${r}:L${r}`);
     ws.getCell(`J${r}`).value = "Full Day Shift (07:00 - 19:00 IST)";
     styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF0F172A", bold: true, align: "left" });
-    ws.getRow(r).height = 21;
+    ws.getRow(r).height = 19;
     r++;
 
     ws.mergeCells(`A${r}:C${r}`);
@@ -1877,7 +1880,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`J${r}:L${r}`);
     ws.getCell(`J${r}`).value = "LIVE AUDIT VERIFIED ✓";
     styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF16A34A", bold: true, align: "left" });
-    ws.getRow(r).height = 21;
+    ws.getRow(r).height = 19;
     r++;
 
     // Calculate aggregated metrics for this tab
@@ -1896,56 +1899,56 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const k1 = r;
     ws.mergeCells(`A${k1}:B${k1}`);
     ws.getCell(`A${k1}`).value = "TOTAL PRODUCTION";
-    styleCell(ws.getCell(`A${k1}`), { bg: "FFEFF6FF", color: "FF1E40AF", bold: true, size: 8.5 });
+    styleCell(ws.getCell(`A${k1}`), { bg: "FFEFF6FF", color: "FF1E40AF", bold: true, size: 8 });
 
     ws.mergeCells(`C${k1}:D${k1}`);
     ws.getCell(`C${k1}`).value = "PLANNED TARGET";
-    styleCell(ws.getCell(`C${k1}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, size: 8.5 });
+    styleCell(ws.getCell(`C${k1}`), { bg: "FFF1F5F9", color: "FF334155", bold: true, size: 8 });
 
     ws.mergeCells(`E${k1}:F${k1}`);
     ws.getCell(`E${k1}`).value = "LINE ACHIEVEMENT";
-    styleCell(ws.getCell(`E${k1}`), { bg: "FFF0FDF4", color: "FF166534", bold: true, size: 8.5 });
+    styleCell(ws.getCell(`E${k1}`), { bg: "FFF0FDF4", color: "FF166534", bold: true, size: 8 });
 
     ws.mergeCells(`G${k1}:H${k1}`);
     ws.getCell(`G${k1}`).value = "TOTAL DOWNTIME";
-    styleCell(ws.getCell(`G${k1}`), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, size: 8.5 });
+    styleCell(ws.getCell(`G${k1}`), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, size: 8 });
 
     ws.mergeCells(`I${k1}:J${k1}`);
     ws.getCell(`I${k1}`).value = "TOTAL RELOADS";
-    styleCell(ws.getCell(`I${k1}`), { bg: "FFFFFBEB", color: "FF92400E", bold: true, size: 8.5 });
+    styleCell(ws.getCell(`I${k1}`), { bg: "FFFFFBEB", color: "FF92400E", bold: true, size: 8 });
 
     ws.mergeCells(`K${k1}:L${k1}`);
     ws.getCell(`K${k1}`).value = "MANPOWER";
-    styleCell(ws.getCell(`K${k1}`), { bg: "FFF5F3FF", color: "FF6D28D9", bold: true, size: 8.5 });
-    ws.getRow(k1).height = 19;
+    styleCell(ws.getCell(`K${k1}`), { bg: "FFF5F3FF", color: "FF6D28D9", bold: true, size: 8 });
+    ws.getRow(k1).height = 17;
     r++;
 
     const k2 = r;
     ws.mergeCells(`A${k2}:B${k2}`);
     ws.getCell(`A${k2}`).value = `${totalProd.toLocaleString()} Units`;
-    styleCell(ws.getCell(`A${k2}`), { bg: "FFEFF6FF", color: "FF1D4ED8", bold: true, size: 12 });
+    styleCell(ws.getCell(`A${k2}`), { bg: "FFEFF6FF", color: "FF1D4ED8", bold: true, size: 11 });
 
     ws.mergeCells(`C${k2}:D${k2}`);
     ws.getCell(`C${k2}`).value = `${totalTarget.toLocaleString()} Units`;
-    styleCell(ws.getCell(`C${k2}`), { bg: "FFF1F5F9", color: "FF0F172A", bold: true, size: 12 });
+    styleCell(ws.getCell(`C${k2}`), { bg: "FFF1F5F9", color: "FF0F172A", bold: true, size: 11 });
 
     ws.mergeCells(`E${k2}:F${k2}`);
     const achValColor = parseFloat(achPercent) >= 90 ? "FF16A34A" : parseFloat(achPercent) >= 60 ? "FFD97706" : "FFDC2626";
     ws.getCell(`E${k2}`).value = `${achPercent}%`;
-    styleCell(ws.getCell(`E${k2}`), { bg: "FFF0FDF4", color: achValColor, bold: true, size: 13 });
+    styleCell(ws.getCell(`E${k2}`), { bg: "FFF0FDF4", color: achValColor, bold: true, size: 12 });
 
     ws.mergeCells(`G${k2}:H${k2}`);
     ws.getCell(`G${k2}`).value = `${totalIdle} Min (${(totalIdle/60).toFixed(1)}h)`;
-    styleCell(ws.getCell(`G${k2}`), { bg: "FFFEE2E2", color: "FFDC2626", bold: true, size: 12 });
+    styleCell(ws.getCell(`G${k2}`), { bg: "FFFEE2E2", color: "FFDC2626", bold: true, size: 11 });
 
     ws.mergeCells(`I${k2}:J${k2}`);
     ws.getCell(`I${k2}`).value = `${totalReloads}`;
-    styleCell(ws.getCell(`I${k2}`), { bg: "FFFFFBEB", color: "FFB45309", bold: true, size: 12 });
+    styleCell(ws.getCell(`I${k2}`), { bg: "FFFFFBEB", color: "FFB45309", bold: true, size: 11 });
 
     ws.mergeCells(`K${k2}:L${k2}`);
     ws.getCell(`K${k2}`).value = `${avgMP}`;
-    styleCell(ws.getCell(`K${k2}`), { bg: "FFF5F3FF", color: "FF7C3AED", bold: true, size: 12 });
-    ws.getRow(k2).height = 28;
+    styleCell(ws.getCell(`K${k2}`), { bg: "FFF5F3FF", color: "FF7C3AED", bold: true, size: 11 });
+    ws.getRow(k2).height = 24;
     r++;
 
     // Blank row
@@ -1955,17 +1958,17 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`A${r}:L${r}`);
     const s1Hdr = ws.getCell(`A${r}`);
     s1Hdr.value = "📊 SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER";
-    styleCell(s1Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(s1Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+    ws.getRow(r).height = 21;
     r++;
 
-    const s1ThCols = ["Sr. No.", "Date", "Time Slot", "Target", "Actual", "Variance", "Achievement %", "Downtime (Min)", "Responsible Dept", "Downtime Reason", "Reloads", "Manpower"];
+    const s1ThCols = ["Sr.", "Date", "Time Slot", "Target", "Actual", "Variance", "Ach %", "Idle (Min)", "Department", "Downtime Reason", "Reloads", "Manpower"];
     s1ThCols.forEach((colName, cIdx) => {
       const cell = ws.getRow(r).getCell(cIdx + 1);
       cell.value = colName;
-      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9, align: "center" });
     });
-    ws.getRow(r).height = 24;
+    ws.getRow(r).height = 21;
     r++;
 
     let hSr = 1;
@@ -2016,7 +2019,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         row.getCell(12).value = d.manpower || 0;
         styleCell(row.getCell(12), { bg: rowBg, align: "center" });
 
-        row.height = 20;
+        row.height = 19;
         r++;
       });
     });
@@ -2025,7 +2028,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const totRow = ws.getRow(r);
     ws.mergeCells(`A${r}:C${r}`);
     totRow.getCell(1).value = isConsolidated ? `GRAND TOTAL (${days.length} DAYS)` : `DAILY TOTAL (${days[0]?.date || ""})`;
-    styleCell(totRow.getCell(1), { bg: "FFE2E8F0", color: "FF0F172A", bold: true, size: 10.5, align: "center", border: totalBorder });
+    styleCell(totRow.getCell(1), { bg: "FFE2E8F0", color: "FF0F172A", bold: true, size: 9.5, align: "center", border: totalBorder });
 
     totRow.getCell(4).value = totalTarget;
     styleCell(totRow.getCell(4), { bg: "FFE2E8F0", bold: true, align: "center", border: totalBorder });
@@ -2054,7 +2057,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
 
     totRow.getCell(12).value = avgMP;
     styleCell(totRow.getCell(12), { bg: "FFE2E8F0", color: "FF7C3AED", bold: true, align: "center", border: totalBorder });
-    totRow.height = 24;
+    totRow.height = 22;
     r++;
 
     // Blank row
@@ -2064,17 +2067,17 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`A${r}:G${r}`);
     const s2Hdr = ws.getCell(`A${r}`);
     s2Hdr.value = `🔢 SECTION 2: UNIT SERIAL NUMBER TRACEABILITY REGISTER (${allSerials.length} RECORDS)`;
-    styleCell(s2Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(s2Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+    ws.getRow(r).height = 21;
     r++;
 
-    const s2ThCols = ["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"];
+    const s2ThCols = ["Sr.", "Production Date", "Time Slot", "Model", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"];
     s2ThCols.forEach((colName, cIdx) => {
       const cell = ws.getRow(r).getCell(cIdx + 1);
       cell.value = colName;
-      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+      styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9, align: "center" });
     });
-    ws.getRow(r).height = 24;
+    ws.getRow(r).height = 21;
     r++;
 
     allSerials.forEach((s, idx) => {
@@ -2104,7 +2107,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(7).value = "PASSED ✓";
       styleCell(row.getCell(7), { bg: "FFDCFCE7", color: "FF166534", bold: true, align: "center" });
 
-      row.height = 20;
+      row.height = 19;
       r++;
     });
 
@@ -2115,17 +2118,17 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`A${r}:H${r}`);
     const s3Hdr = ws.getCell(`A${r}`);
     s3Hdr.value = `⏱ SECTION 3: LINE STOPPAGE & DOWNTIME AUDIT REGISTER (${allIdles.length} INCIDENTS, ${totalIdle} MINS)`;
-    styleCell(s3Hdr, { bg: "FF991B1B", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(s3Hdr, { bg: "FF991B1B", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+    ws.getRow(r).height = 21;
     r++;
 
-    const s3ThCols = ["Sr. No.", "Incident Date", "Time Slot", "From Time", "To Time", "Duration (Min)", "Department", "Root Cause / Reason"];
+    const s3ThCols = ["Sr.", "Incident Date", "Time Slot", "From", "To", "Idle (Min)", "Department", "Root Cause / Reason"];
     s3ThCols.forEach((colName, cIdx) => {
       const cell = ws.getRow(r).getCell(cIdx + 1);
       cell.value = colName;
-      styleCell(cell, { bg: "FFDC2626", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+      styleCell(cell, { bg: "FFDC2626", color: "FFFFFFFF", bold: true, size: 9, align: "center" });
     });
-    ws.getRow(r).height = 24;
+    ws.getRow(r).height = 21;
     r++;
 
     allIdles.forEach((item, idx) => {
@@ -2157,7 +2160,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(8).value = item.reason || "Unspecified";
       styleCell(row.getCell(8), { bg: rowBg, align: "left" });
 
-      row.height = 20;
+      row.height = 19;
       r++;
     });
 
@@ -2173,7 +2176,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       ws.mergeCells(`G${r}:H${r}`);
       idleTotRow.getCell(7).value = "-";
       styleCell(idleTotRow.getCell(7), { bg: "FFE2E8F0", align: "center", border: totalBorder });
-      idleTotRow.height = 24;
+      idleTotRow.height = 22;
       r++;
     }
 
@@ -2184,17 +2187,17 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`A${r}:F${r}`);
     const s4Hdr = ws.getCell(`A${r}`);
     s4Hdr.value = `🔄 SECTION 4: MATERIAL RELOAD & RESCAN AUDIT REGISTER (${allReloads.length} EVENTS)`;
-    styleCell(s4Hdr, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 24;
+    styleCell(s4Hdr, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+    ws.getRow(r).height = 21;
     r++;
 
-    const s4ThCols = ["Sr. No.", "Record Date", "Time Slot", "Component / Type", "Reload Count", "Timestamp"];
+    const s4ThCols = ["Sr.", "Record Date", "Time Slot", "Component / Type", "Count", "Timestamp"];
     s4ThCols.forEach((colName, cIdx) => {
       const cell = ws.getRow(r).getCell(cIdx + 1);
       cell.value = colName;
-      styleCell(cell, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+      styleCell(cell, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 9, align: "center" });
     });
-    ws.getRow(r).height = 24;
+    ws.getRow(r).height = 21;
     r++;
 
     allReloads.forEach((item, idx) => {
@@ -2220,7 +2223,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(6).value = item.ts || "-";
       styleCell(row.getCell(6), { bg: rowBg, color: "FF475569", align: "center" });
 
-      row.height = 20;
+      row.height = 19;
       r++;
     });
 
@@ -2235,7 +2238,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
 
       rldTotRow.getCell(6).value = "-";
       styleCell(rldTotRow.getCell(6), { bg: "FFE2E8F0", align: "center", border: totalBorder });
-      rldTotRow.height = 24;
+      rldTotRow.height = 22;
       r++;
     }
 
@@ -2263,17 +2266,17 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       ws.mergeCells(`A${r}:F${r}`);
       const s5Hdr = ws.getCell(`A${r}`);
       s5Hdr.value = `🔍 SECTION 5: MISSING SERIAL NUMBERS AUDIT (${missingList.length} RECORDS)`;
-      styleCell(s5Hdr, { bg: "FF475569", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-      ws.getRow(r).height = 24;
+      styleCell(s5Hdr, { bg: "FF475569", color: "FFFFFFFF", bold: true, size: 10, align: "left", border: null });
+      ws.getRow(r).height = 21;
       r++;
 
-      const s5ThCols = ["Sr. No.", "Production Date", "Model Number", "Configured Range", "Missing Serial Number", "Audit Status"];
+      const s5ThCols = ["Sr.", "Production Date", "Model", "Range", "Missing Serial Number", "Audit Status"];
       s5ThCols.forEach((colName, cIdx) => {
         const cell = ws.getRow(r).getCell(cIdx + 1);
         cell.value = colName;
-        styleCell(cell, { bg: "FF64748B", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
+        styleCell(cell, { bg: "FF64748B", color: "FFFFFFFF", bold: true, size: 9, align: "center" });
       });
-      ws.getRow(r).height = 24;
+      ws.getRow(r).height = 21;
       r++;
 
       missingList.forEach((m, idx) => {
@@ -2299,34 +2302,9 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         row.getCell(6).value = "MISSING";
         styleCell(row.getCell(6), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, align: "center" });
 
-        row.height = 20;
+        row.height = 19;
         r++;
       });
-    }
-
-    // Auto-fit & ensure generous column widths for all columns
-    const minWidths = [10, 16, 16, 18, 35, 30, 20, 16, 22, 38, 14, 14];
-    for (let c = 1; c <= 12; c++) {
-      const col = ws.getColumn(c);
-      let maxLen = minWidths[c - 1] || 15;
-      col.eachCell({ includeEmpty: false }, (cell, rIdx) => {
-        if (rIdx > 5) {
-          const str = cell.value != null ? String(cell.value) : "";
-          if (
-            !str.startsWith("📊") &&
-            !str.startsWith("🔢") &&
-            !str.startsWith("⏱") &&
-            !str.startsWith("🔄") &&
-            !str.startsWith("🔍") &&
-            !str.startsWith("📋") &&
-            !str.startsWith("PG ELECTROPLAST") &&
-            !str.startsWith("ATOMBERG")
-          ) {
-            if (str.length > maxLen) maxLen = str.length;
-          }
-        }
-      });
-      col.width = Math.max(maxLen + 5, minWidths[c - 1] || 15);
     }
   };
 
