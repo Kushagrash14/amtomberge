@@ -2303,6 +2303,31 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         r++;
       });
     }
+
+    // Auto-fit & ensure generous column widths for all columns
+    const minWidths = [10, 16, 16, 18, 35, 30, 20, 16, 22, 38, 14, 14];
+    for (let c = 1; c <= 12; c++) {
+      const col = ws.getColumn(c);
+      let maxLen = minWidths[c - 1] || 15;
+      col.eachCell({ includeEmpty: false }, (cell, rIdx) => {
+        if (rIdx > 5) {
+          const str = cell.value != null ? String(cell.value) : "";
+          if (
+            !str.startsWith("📊") &&
+            !str.startsWith("🔢") &&
+            !str.startsWith("⏱") &&
+            !str.startsWith("🔄") &&
+            !str.startsWith("🔍") &&
+            !str.startsWith("📋") &&
+            !str.startsWith("PG ELECTROPLAST") &&
+            !str.startsWith("ATOMBERG")
+          ) {
+            if (str.length > maxLen) maxLen = str.length;
+          }
+        }
+      });
+      col.width = Math.max(maxLen + 5, minWidths[c - 1] || 15);
+    }
   };
 
   // 1. Build Tab 1: Consolidated Summary
