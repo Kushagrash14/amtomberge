@@ -124,13 +124,7 @@ const getSheet = async (sheetName) => {
   }
 };
 
-// ─── Download sheet helpers — map old sheet names to API download paths ───────
-// FIX 5: dlSheet used old Google Sheets names; now maps to correct API endpoints
-const SHEET_DOWNLOAD_MAP = {
-  ProductionData: (today) => `/data?date=${encodeURIComponent(today)}`,
-  Idle_Records:   (today) => `/idle?date=${encodeURIComponent(today)}`,
-  Reloads:        (today) => `/reloads?date=${encodeURIComponent(today)}`,
-};
+
 
 // ─── Slots & defaults ─────────────────────────────────────────────────────────
 const SLOTS = [
@@ -1293,40 +1287,6 @@ function ProductionMonitor({ onLogout }) {
     }).catch(() => setUsersList([]));
   }, []);
 
-  // ── Export ───────────────────────────────────────────────────────────────────
-  const dlFile = (content, name, mime) => {
-    const blob = new Blob([content], { type:mime }), url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = name; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const exportCSV = () => {
-    let csv = "Time Slot,Production,Target,Achievement %,Idle Time (min),Department,Reloads\n";
-    (S.hourly||[]).forEach(h => {
-      const a = (h.target||0) > 0 ? Math.round(((h.prod||0)/(h.target||0))*100) : 0;
-      csv += h.slot+","+(h.prod||0)+","+(h.target||0)+","+a+"%,"+(h.idle||0)+","+(h.dept||"-")+","+(h.reloads||0)+"\n";
-    });
-    dlFile(csv, "Hourly_"+S.date+".csv", "text/csv");
-  };
-
-  const dlBackup = () => dlFile(JSON.stringify({ date:S.date, totalProd:S.totalProd, manpower, hourly:S.hourly }, null, 2), "Backup_"+S.date+".json", "application/json");
-
-  // FIX 10: dlSheet now uses the new API path map instead of calling getSheet with old sheet names
-  const dlSheet = (sheetName) => {
-    const pathFn = SHEET_DOWNLOAD_MAP[sheetName];
-    if (!pathFn) { alert("Download not available for: " + sheetName); return; }
-    setSyncUI("syncing", "Downloading " + sheetName + "...");
-    apiFetch("GET", pathFn(todayStr())).then(res => {
-      if (res.error) { alert("Error: " + res.error); setSyncUI("error", "Download failed"); return; }
-      const csv = (res.data||[]).map(row =>
-        (row||[]).map(cell => { const s = cell == null ? "" : ("" + cell); return (s.includes(",") || s.includes('"') || s.includes("\n")) ? '"' + s.replace(/"/g,'""') + '"' : s; }).join(",")
-      ).join("\n");
-      dlFile(csv, sheetName+"_"+todayStr()+".csv", "text/csv");
-      setSyncUI("", sheetName + " downloaded ✓");
-      setTimeout(() => setSyncUI("", "Connected ✓"), 2500);
-    }).catch(() => { setSyncUI("error", "Download failed"); alert("Download failed: " + sheetName); });
-  };
-
   const newDayReset = () => {
     if (!confirm("⚠️ RESET FOR NEW DAY?\n\nDashboard will clear.\nAll database data is safe.\n\nContinue?")) return;
     if (!confirm("Final confirmation: Reset now?")) return;
@@ -1513,21 +1473,41 @@ function ProductionMonitor({ onLogout }) {
                   <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
                 )}
               </div>
+              {activeTab === "dashboard" && (
+                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                  <button
+                    className="btn btn-navy"
+                    style={{padding:"5px 12px",fontSize:11,gap:5,whiteSpace:"nowrap"}}
+                    onClick={loadAll}
+                    title="Refresh live dashboard data"
+                  >
+                    🔄 Refresh
+                  </button>
+                  <button
+                    className="btn btn-dngr"
+                    style={{padding:"5px 12px",fontSize:11,gap:5,whiteSpace:"nowrap"}}
+                    onClick={newDayReset}
+                    title="Reset production data for new day"
+                  >
+                    🔄 New Day Reset
+                  </button>
+                </div>
+              )}
               {activeTab === "reports" && (
                 <button
                   className="btn btn-export"
-                  style={{padding:"6px 14px",fontSize:11,gap:5,whiteSpace:"nowrap",flexShrink:0}}
+                  style={{padding:"5px 14px",fontSize:11,gap:5,whiteSpace:"nowrap",flexShrink:0}}
                   onClick={() => setExportModalOpen(true)}
                   title="Download Excel Report"
                 >
-                  📥 Download Excel Report
+                  📥 Excel
                 </button>
               )}
             </div>
           );
         })()}
 
-        {activeTab==="dashboard" && <DashboardTab S={S} kpi={kpi} exportCSV={exportCSV} loadAll={loadAll} dlBackup={dlBackup} dlSheet={dlSheet} newDayReset={newDayReset}/>}
+        {activeTab==="dashboard" && <DashboardTab S={S} kpi={kpi}/>}
         {activeTab==="scanning" && (
           <ScanningTab
             S={S} scanLocked={scanLocked} seqBanner={seqBanner}
@@ -1598,7 +1578,7 @@ function ProductionMonitor({ onLogout }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-function DashboardTab({ S, kpi, exportCSV, loadAll, dlBackup, dlSheet, newDayReset }) {
+function DashboardTab({ S, kpi }) {
   const now    = new Date(new Date().toLocaleString("en-US", { timeZone:"Asia/Kolkata" }));
   const curHr  = now.getHours();
   const achCls = kpi.ach >= 100 ? "kpi-card green" : kpi.ach >= 80 ? "kpi-card amber" : "kpi-card red";
@@ -1635,15 +1615,6 @@ function DashboardTab({ S, kpi, exportCSV, loadAll, dlBackup, dlSheet, newDayRes
             })}
           </tbody>
         </table>
-      </div>
-      <div className="btn-row">
-        <button className="btn btn-grn" onClick={exportCSV}>⬇ Hourly CSV</button>
-        <button className="btn btn-navy" onClick={loadAll}>🔄 Refresh</button>
-        <button className="btn btn-amb" onClick={dlBackup}>💾 Backup JSON</button>
-        <button className="btn btn-grn" onClick={()=>dlSheet("ProductionData")}>⬇ Serials CSV</button>
-        <button className="btn btn-grn" onClick={()=>dlSheet("Idle_Records")}>⬇ Idle CSV</button>
-        <button className="btn btn-grn" onClick={()=>dlSheet("Reloads")}>⬇ Reloads CSV</button>
-        <button className="btn btn-dngr" onClick={newDayReset}>🔄 New Day Reset</button>
       </div>
     </div>
   );
@@ -2611,7 +2582,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
           {/* Active Report Content */}
           {activeReport === "daily" && (
             <div>
-              <div className="kpi-grid" style={{marginBottom:14}}>
+              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(6, 1fr)",gap:8,marginBottom:14}}>
                 <div className={`kpi-card ${slotStats.ach >= 90 ? "green" : slotStats.ach >= 70 ? "amber" : "red"}`}>
                   <div className="v">{slotStats.prod}</div>
                   <div className="l">PRODUCTION ({selectedSlot || "DAY"})</div>
