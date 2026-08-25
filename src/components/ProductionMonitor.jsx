@@ -1797,28 +1797,28 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     right: { style: "thin", color: { argb: "FFCBD5E1" } },
   };
 
-  const styleCell = (cell, { bg, color, bold, size = 10, align = "center", border = thinBorder }) => {
+  const styleCell = (cell, { bg, color, bold, size = 10, align = "center", border = thinBorder, wrap = false }) => {
     if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
     cell.font = { name: "Segoe UI", size, bold: !!bold, color: { argb: color || "FF0F172A" } };
-    cell.alignment = { horizontal: align, vertical: "middle", wrapText: true };
+    cell.alignment = { horizontal: align, vertical: "middle", wrapText: !!wrap };
     if (border) cell.border = border;
   };
 
   const buildWorksheet = (ws, titleSuffix, subLabel, days, isConsolidated) => {
     ws.views = [{ showGridLines: true }];
     ws.columns = [
-      { width: 7 },   // A: Sr No
-      { width: 13 },  // B: Date
-      { width: 14 },  // C: Time Slot
-      { width: 12 },  // D: Target
-      { width: 12 },  // E: Actual
-      { width: 12 },  // F: Variance
-      { width: 14 },  // G: Ach %
-      { width: 13 },  // H: Downtime
-      { width: 16 },  // I: Dept
-      { width: 24 },  // J: Reason
-      { width: 10 },  // K: Reloads
-      { width: 12 },  // L: Manpower
+      { width: 8 },   // A: Sr No
+      { width: 14 },  // B: Date (e.g. 2026-08-25)
+      { width: 15 },  // C: Time Slot (e.g. 07:00-08:00)
+      { width: 15 },  // D: Target / Model / Range
+      { width: 28 },  // E: Actual / Barcode Serial Number (e.g. WK26FG0482D00033)
+      { width: 25 },  // F: Variance / Timestamp (e.g. 25/8/2026, 8:03:10 am)
+      { width: 18 },  // G: Ach % / Status (e.g. PASSED ✓)
+      { width: 16 },  // H: Downtime Min
+      { width: 20 },  // I: Responsible Dept
+      { width: 32 },  // J: Downtime Reason
+      { width: 12 },  // K: Reloads
+      { width: 14 },  // L: Manpower
     ];
 
     let r = 1;
@@ -1828,7 +1828,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const c1 = ws.getCell(`A${r}`);
     c1.value = "PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM";
     styleCell(c1, { bg: "FF0F172A", color: "FFFFFFFF", bold: true, size: 13, align: "center", border: null });
-    ws.getRow(r).height = 28;
+    ws.getRow(r).height = 30;
     r++;
 
     // 2. Subtitle
@@ -1836,7 +1836,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const c2 = ws.getCell(`A${r}`);
     c2.value = `ATOMBERG ASSEMBLY & PACKAGING LINE — ${titleSuffix.toUpperCase()}`;
     styleCell(c2, { bg: "FF1E293B", color: "FF93C5FD", bold: true, size: 10, align: "center", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     // 3. Metadata Header
@@ -1844,7 +1844,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const cMeta = ws.getCell(`A${r}`);
     cMeta.value = "📋 REPORT PARAMETERS & EXECUTIVE SUMMARY";
     styleCell(cMeta, { bg: "FF1E3A8A", color: "FFFFFFFF", bold: true, size: 10.5, align: "left", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     // Metadata Details
@@ -1861,7 +1861,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`J${r}:L${r}`);
     ws.getCell(`J${r}`).value = "Full Day Shift (07:00 - 19:00 IST)";
     styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF0F172A", bold: true, align: "left" });
-    ws.getRow(r).height = 20;
+    ws.getRow(r).height = 21;
     r++;
 
     ws.mergeCells(`A${r}:C${r}`);
@@ -1877,7 +1877,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`J${r}:L${r}`);
     ws.getCell(`J${r}`).value = "LIVE AUDIT VERIFIED ✓";
     styleCell(ws.getCell(`J${r}`), { bg: "FFFFFFFF", color: "FF16A34A", bold: true, align: "left" });
-    ws.getRow(r).height = 20;
+    ws.getRow(r).height = 21;
     r++;
 
     // Calculate aggregated metrics for this tab
@@ -1917,7 +1917,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`K${k1}:L${k1}`);
     ws.getCell(`K${k1}`).value = "MANPOWER";
     styleCell(ws.getCell(`K${k1}`), { bg: "FFF5F3FF", color: "FF6D28D9", bold: true, size: 8.5 });
-    ws.getRow(k1).height = 18;
+    ws.getRow(k1).height = 19;
     r++;
 
     const k2 = r;
@@ -1945,7 +1945,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     ws.mergeCells(`K${k2}:L${k2}`);
     ws.getCell(`K${k2}`).value = `${avgMP}`;
     styleCell(ws.getCell(`K${k2}`), { bg: "FFF5F3FF", color: "FF7C3AED", bold: true, size: 12 });
-    ws.getRow(k2).height = 26;
+    ws.getRow(k2).height = 28;
     r++;
 
     // Blank row
@@ -1956,7 +1956,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const s1Hdr = ws.getCell(`A${r}`);
     s1Hdr.value = "📊 SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER";
     styleCell(s1Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     const s1ThCols = ["Sr. No.", "Date", "Time Slot", "Target", "Actual", "Variance", "Achievement %", "Downtime (Min)", "Responsible Dept", "Downtime Reason", "Reloads", "Manpower"];
@@ -1965,7 +1965,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       cell.value = colName;
       styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
     });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     let hSr = 1;
@@ -2016,7 +2016,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         row.getCell(12).value = d.manpower || 0;
         styleCell(row.getCell(12), { bg: rowBg, align: "center" });
 
-        row.height = 19;
+        row.height = 20;
         r++;
       });
     });
@@ -2054,7 +2054,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
 
     totRow.getCell(12).value = avgMP;
     styleCell(totRow.getCell(12), { bg: "FFE2E8F0", color: "FF7C3AED", bold: true, align: "center", border: totalBorder });
-    totRow.height = 22;
+    totRow.height = 24;
     r++;
 
     // Blank row
@@ -2065,7 +2065,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const s2Hdr = ws.getCell(`A${r}`);
     s2Hdr.value = `🔢 SECTION 2: UNIT SERIAL NUMBER TRACEABILITY REGISTER (${allSerials.length} RECORDS)`;
     styleCell(s2Hdr, { bg: "FF1E40AF", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     const s2ThCols = ["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"];
@@ -2074,7 +2074,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       cell.value = colName;
       styleCell(cell, { bg: "FF2563EB", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
     });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     allSerials.forEach((s, idx) => {
@@ -2104,7 +2104,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(7).value = "PASSED ✓";
       styleCell(row.getCell(7), { bg: "FFDCFCE7", color: "FF166534", bold: true, align: "center" });
 
-      row.height = 18;
+      row.height = 20;
       r++;
     });
 
@@ -2116,7 +2116,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const s3Hdr = ws.getCell(`A${r}`);
     s3Hdr.value = `⏱ SECTION 3: LINE STOPPAGE & DOWNTIME AUDIT REGISTER (${allIdles.length} INCIDENTS, ${totalIdle} MINS)`;
     styleCell(s3Hdr, { bg: "FF991B1B", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     const s3ThCols = ["Sr. No.", "Incident Date", "Time Slot", "From Time", "To Time", "Duration (Min)", "Department", "Root Cause / Reason"];
@@ -2125,7 +2125,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       cell.value = colName;
       styleCell(cell, { bg: "FFDC2626", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
     });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     allIdles.forEach((item, idx) => {
@@ -2157,7 +2157,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(8).value = item.reason || "Unspecified";
       styleCell(row.getCell(8), { bg: rowBg, align: "left" });
 
-      row.height = 18;
+      row.height = 20;
       r++;
     });
 
@@ -2173,7 +2173,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       ws.mergeCells(`G${r}:H${r}`);
       idleTotRow.getCell(7).value = "-";
       styleCell(idleTotRow.getCell(7), { bg: "FFE2E8F0", align: "center", border: totalBorder });
-      idleTotRow.height = 20;
+      idleTotRow.height = 24;
       r++;
     }
 
@@ -2185,7 +2185,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     const s4Hdr = ws.getCell(`A${r}`);
     s4Hdr.value = `🔄 SECTION 4: MATERIAL RELOAD & RESCAN AUDIT REGISTER (${allReloads.length} EVENTS)`;
     styleCell(s4Hdr, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     const s4ThCols = ["Sr. No.", "Record Date", "Time Slot", "Component / Type", "Reload Count", "Timestamp"];
@@ -2194,7 +2194,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       cell.value = colName;
       styleCell(cell, { bg: "FFD97706", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
     });
-    ws.getRow(r).height = 22;
+    ws.getRow(r).height = 24;
     r++;
 
     allReloads.forEach((item, idx) => {
@@ -2220,7 +2220,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       row.getCell(6).value = item.ts || "-";
       styleCell(row.getCell(6), { bg: rowBg, color: "FF475569", align: "center" });
 
-      row.height = 18;
+      row.height = 20;
       r++;
     });
 
@@ -2235,7 +2235,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
 
       rldTotRow.getCell(6).value = "-";
       styleCell(rldTotRow.getCell(6), { bg: "FFE2E8F0", align: "center", border: totalBorder });
-      rldTotRow.height = 20;
+      rldTotRow.height = 24;
       r++;
     }
 
@@ -2264,7 +2264,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
       const s5Hdr = ws.getCell(`A${r}`);
       s5Hdr.value = `🔍 SECTION 5: MISSING SERIAL NUMBERS AUDIT (${missingList.length} RECORDS)`;
       styleCell(s5Hdr, { bg: "FF475569", color: "FFFFFFFF", bold: true, size: 11, align: "left", border: null });
-      ws.getRow(r).height = 22;
+      ws.getRow(r).height = 24;
       r++;
 
       const s5ThCols = ["Sr. No.", "Production Date", "Model Number", "Configured Range", "Missing Serial Number", "Audit Status"];
@@ -2273,7 +2273,7 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         cell.value = colName;
         styleCell(cell, { bg: "FF64748B", color: "FFFFFFFF", bold: true, size: 9.5, align: "center" });
       });
-      ws.getRow(r).height = 22;
+      ws.getRow(r).height = 24;
       r++;
 
       missingList.forEach((m, idx) => {
@@ -2296,10 +2296,10 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
         row.getCell(5).value = m.serial;
         styleCell(row.getCell(5), { bg: rowBg, color: "FFDC2626", bold: true, align: "center" });
 
-        row.getCell(6).value = "MISSING / UNSCANNED";
+        row.getCell(6).value = "MISSING";
         styleCell(row.getCell(6), { bg: "FFFEE2E2", color: "FF991B1B", bold: true, align: "center" });
 
-        row.height = 18;
+        row.height = 20;
         r++;
       });
     }
