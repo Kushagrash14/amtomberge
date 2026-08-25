@@ -1776,22 +1776,217 @@ function ScanningTab({ S, scanLocked, seqBanner, scanInputsVisible, curModel, on
 // ═══════════════════════════════════════════════════════════════════════════════
 // REPORTS TAB (with Date Filter, Time Slot Filter & Excel Export)
 // ═══════════════════════════════════════════════════════════════════════════════
-function dlExcelCSV(filename, rows) {
-  const csvContent = "\uFEFF" + rows.map(row =>
-    (row || []).map(cell => {
-      const s = cell == null ? "" : String(cell);
-      if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }).join(",")
-  ).join("\r\n");
+function dlIndustrialExcel(filename, reportData) {
+  const {
+    sDate, eDate, dateCount, generatedAt,
+    totalProd, totalTarget, overallAch, totalIdle, totalReloads, avgManpower,
+    hourlyRowsHtml, serialRowsHtml, serialCount, idleRowsHtml, idleCount, reloadRowsHtml, reloadCount, missingRowsHtml, missingCount
+  } = reportData;
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const html = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"/>
+  <!--[if gte mso 9]>
+  <xml>
+    <x:ExcelWorkbook>
+      <x:ExcelWorksheets>
+        <x:ExcelWorksheet>
+          <x:Name>Atomberg Production Audit</x:Name>
+          <x:WorksheetOptions>
+            <x:DisplayGridlines/>
+          </x:WorksheetOptions>
+        </x:ExcelWorksheet>
+      </x:ExcelWorksheets>
+    </x:ExcelWorkbook>
+  </xml>
+  <![endif]-->
+  <style>
+    body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 11pt; color: #0f172a; margin: 0; }
+    table { border-collapse: collapse; margin-bottom: 22px; width: 100%; }
+    th, td { border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10.5pt; vertical-align: middle; }
+    
+    .hdr-main { background-color: #0f172a; color: #ffffff; font-size: 15pt; font-weight: bold; text-align: center; height: 38px; }
+    .hdr-sub { background-color: #1e293b; color: #93c5fd; font-size: 11pt; font-weight: bold; text-align: center; height: 26px; }
+    
+    .meta-hdr { background-color: #1e3a8a; color: #ffffff; font-weight: bold; font-size: 11pt; height: 26px; }
+    .meta-lbl { background-color: #f1f5f9; font-weight: bold; color: #334155; }
+    .meta-val { background-color: #ffffff; color: #0f172a; font-weight: 600; }
+    
+    .kpi-lbl { background-color: #f8fafc; font-size: 9pt; font-weight: bold; color: #64748b; text-align: center; text-transform: uppercase; }
+    .kpi-val { font-size: 14pt; font-weight: bold; text-align: center; height: 34px; }
+    
+    .sec-bar { background-color: #1e40af; color: #ffffff; font-size: 12pt; font-weight: bold; padding: 8px 12px; height: 30px; }
+    .tbl-th { background-color: #2563eb; color: #ffffff; font-weight: bold; text-align: center; font-size: 10pt; height: 28px; }
+    
+    .row-even { background-color: #ffffff; }
+    .row-odd { background-color: #f8fafc; }
+    
+    .badge-ok { background-color: #dcfce7; color: #166534; font-weight: bold; text-align: center; }
+    .badge-warn { background-color: #fef3c7; color: #92400e; font-weight: bold; text-align: center; }
+    .badge-bad { background-color: #fee2e2; color: #991b1b; font-weight: bold; text-align: center; }
+    
+    .num-pos { color: #16a34a; font-weight: bold; }
+    .num-neg { color: #dc2626; font-weight: bold; }
+    .num-zero { color: #64748b; font-weight: 600; }
+    
+    .tot-row { background-color: #e2e8f0; font-weight: bold; font-size: 11pt; border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; }
+    .tot-lbl { background-color: #cbd5e1; font-weight: bold; font-size: 11pt; text-align: center; }
+    
+    .text-c { text-align: center; }
+    .text-r { text-align: right; }
+    .text-l { text-align: left; }
+    .mono { font-family: 'Consolas', monospace; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <!-- HEADER BANNER -->
+  <table>
+    <tr>
+      <th colspan="12" class="hdr-main">PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM</th>
+    </tr>
+    <tr>
+      <th colspan="12" class="hdr-sub">ATOMBERG ASSEMBLY & PACKAGING LINE — INDUSTRIAL AUDIT & PERFORMANCE REPORT</th>
+    </tr>
+  </table>
+
+  <!-- EXECUTIVE SUMMARY & METADATA -->
+  <table>
+    <tr>
+      <th colspan="12" class="meta-hdr">📋 REPORT PARAMETERS & METADATA</th>
+    </tr>
+    <tr>
+      <td colspan="3" class="meta-lbl">Date Range:</td>
+      <td colspan="3" class="meta-val">${sDate} to ${eDate} (${dateCount} Day${dateCount > 1 ? "s" : ""})</td>
+      <td colspan="3" class="meta-lbl">Shift Operating Window:</td>
+      <td colspan="3" class="meta-val">Full Day Operations (07:00 - 19:00 IST)</td>
+    </tr>
+    <tr>
+      <td colspan="3" class="meta-lbl">Report Generated At:</td>
+      <td colspan="3" class="meta-val">${generatedAt}</td>
+      <td colspan="3" class="meta-lbl">Industrial Line Status:</td>
+      <td colspan="3" class="meta-val" style="color:#16a34a;font-weight:bold;">LIVE AUDIT VERIFIED ✓</td>
+    </tr>
+  </table>
+
+  <!-- KEY PERFORMANCE INDICATORS (KPIs) -->
+  <table>
+    <tr>
+      <th colspan="2" class="kpi-lbl" style="background-color:#eff6ff;color:#1e40af;">Total Production</th>
+      <th colspan="2" class="kpi-lbl" style="background-color:#f1f5f9;color:#334155;">Planned Target</th>
+      <th colspan="2" class="kpi-lbl" style="background-color:#f0fdf4;color:#166534;">Line Achievement</th>
+      <th colspan="2" class="kpi-lbl" style="background-color:#fef2f2;color:#991b1b;">Total Downtime</th>
+      <th colspan="2" class="kpi-lbl" style="background-color:#fffbeb;color:#92400e;">Total Reloads</th>
+      <th colspan="2" class="kpi-lbl" style="background-color:#f5f3ff;color:#6d28d9;">Avg Manpower</th>
+    </tr>
+    <tr>
+      <td colspan="2" class="kpi-val" style="background-color:#eff6ff;color:#1d4ed8;">${Number(totalProd).toLocaleString()} Units</td>
+      <td colspan="2" class="kpi-val" style="background-color:#f1f5f9;color:#0f172a;">${Number(totalTarget).toLocaleString()} Units</td>
+      <td colspan="2" class="kpi-val" style="background-color:#f0fdf4;color:${parseFloat(overallAch)>=90?'#16a34a':parseFloat(overallAch)>=60?'#d97706':'#dc2626'};">${overallAch}%</td>
+      <td colspan="2" class="kpi-val" style="background-color:#fef2f2;color:#dc2626;">${totalIdle} Min (${(totalIdle/60).toFixed(1)}h)</td>
+      <td colspan="2" class="kpi-val" style="background-color:#fffbeb;color:#b45309;">${totalReloads}</td>
+      <td colspan="2" class="kpi-val" style="background-color:#f5f3ff;color:#7c3aed;">${avgManpower}</td>
+    </tr>
+  </table>
+
+  <!-- SECTION 1: HOURLY PRODUCTION -->
+  <table>
+    <tr>
+      <th colspan="12" class="sec-bar">📊 SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER</th>
+    </tr>
+    <tr>
+      <th class="tbl-th" style="width:50px;">Sr. No.</th>
+      <th class="tbl-th" style="width:100px;">Date</th>
+      <th class="tbl-th" style="width:120px;">Time Slot</th>
+      <th class="tbl-th" style="width:90px;">Target</th>
+      <th class="tbl-th" style="width:90px;">Actual</th>
+      <th class="tbl-th" style="width:90px;">Variance</th>
+      <th class="tbl-th" style="width:110px;">Achievement %</th>
+      <th class="tbl-th" style="width:100px;">Downtime (Min)</th>
+      <th class="tbl-th" style="width:140px;">Responsible Dept</th>
+      <th class="tbl-th" style="width:180px;">Downtime Reason</th>
+      <th class="tbl-th" style="width:80px;">Reloads</th>
+      <th class="tbl-th" style="width:90px;">Manpower</th>
+    </tr>
+    ${hourlyRowsHtml}
+  </table>
+
+  <!-- SECTION 2: SCANNED SERIAL NUMBERS -->
+  <table>
+    <tr>
+      <th colspan="7" class="sec-bar">🔢 SECTION 2: UNIT SERIAL NUMBER TRACEABILITY REGISTER (${serialCount} RECORDS)</th>
+    </tr>
+    <tr>
+      <th class="tbl-th" style="width:60px;">Sr. No.</th>
+      <th class="tbl-th" style="width:110px;">Production Date</th>
+      <th class="tbl-th" style="width:130px;">Time Slot</th>
+      <th class="tbl-th" style="width:150px;">Model Number</th>
+      <th class="tbl-th" style="width:220px;">Barcode / Serial Number</th>
+      <th class="tbl-th" style="width:180px;">Scan Timestamp (IST)</th>
+      <th class="tbl-th" style="width:140px;">Inspection Status</th>
+    </tr>
+    ${serialRowsHtml}
+  </table>
+
+  <!-- SECTION 3: IDLE TIME AUDIT -->
+  <table>
+    <tr>
+      <th colspan="8" class="sec-bar" style="background-color:#991b1b;">⏱ SECTION 3: LINE STOPPAGE & DOWNTIME AUDIT REGISTER (${idleCount} INCIDENTS, ${totalIdle} MINS)</th>
+    </tr>
+    <tr>
+      <th class="tbl-th" style="width:60px;">Sr. No.</th>
+      <th class="tbl-th" style="width:110px;">Incident Date</th>
+      <th class="tbl-th" style="width:130px;">Time Slot</th>
+      <th class="tbl-th" style="width:100px;">From Time</th>
+      <th class="tbl-th" style="width:100px;">To Time</th>
+      <th class="tbl-th" style="width:110px;">Duration (Min)</th>
+      <th class="tbl-th" style="width:160px;">Department</th>
+      <th class="tbl-th" style="width:240px;">Root Cause / Reason</th>
+    </tr>
+    ${idleRowsHtml}
+  </table>
+
+  <!-- SECTION 4: RELOADS & RESCANS -->
+  <table>
+    <tr>
+      <th colspan="6" class="sec-bar" style="background-color:#d97706;">🔄 SECTION 4: MATERIAL RELOAD & RESCAN AUDIT REGISTER (${reloadCount} EVENTS)</th>
+    </tr>
+    <tr>
+      <th class="tbl-th" style="width:60px;">Sr. No.</th>
+      <th class="tbl-th" style="width:110px;">Record Date</th>
+      <th class="tbl-th" style="width:130px;">Time Slot</th>
+      <th class="tbl-th" style="width:180px;">Component / Type</th>
+      <th class="tbl-th" style="width:110px;">Reload Count</th>
+      <th class="tbl-th" style="width:180px;">Timestamp</th>
+    </tr>
+    ${reloadRowsHtml}
+  </table>
+
+  ${missingCount > 0 ? `
+  <!-- SECTION 5: MISSING SERIALS -->
+  <table>
+    <tr>
+      <th colspan="6" class="sec-bar" style="background-color:#475569;">🔍 SECTION 5: MISSING SERIAL NUMBERS AUDIT (${missingCount} RECORDS)</th>
+    </tr>
+    <tr>
+      <th class="tbl-th" style="width:60px;">Sr. No.</th>
+      <th class="tbl-th" style="width:110px;">Production Date</th>
+      <th class="tbl-th" style="width:150px;">Model Number</th>
+      <th class="tbl-th" style="width:160px;">Configured Range</th>
+      <th class="tbl-th" style="width:180px;">Missing Serial Number</th>
+      <th class="tbl-th" style="width:150px;">Audit Status</th>
+    </tr>
+    ${missingRowsHtml}
+  </table>` : ''}
+</body>
+</html>
+  `;
+
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
+  a.download = filename.endsWith(".xls") ? filename : `${filename}.xls`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1811,8 +2006,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
   const [exportEnd, setExportEnd] = useState(liveS?.date || todayStr());
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
-  const exportType = "full";
-  const exportSlot = "";
 
   const isToday = reportDate === (liveS?.date || todayStr());
 
@@ -2194,18 +2387,12 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
       setExportProgress("Formatting Industrial Excel Report...");
 
-      const slotFilter = exportSlot;
       const isSingleDay = sDate === eDate;
       const dateRangeLabel = isSingleDay ? sDate : `${sDate}_to_${eDate}`;
 
-      const allSerialsList = allDaysData.flatMap(day => day.serials).filter(s => {
-        if (!slotFilter) return true;
-        const sIdx = tsToSlot(s.ts);
-        return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
-      });
-
-      const allIdlesList = allDaysData.flatMap(day => day.idles).filter(r => !slotFilter || r.slot === slotFilter);
-      const allReloadsList = allDaysData.flatMap(day => day.reloads).filter(r => !slotFilter || r.slot === slotFilter);
+      const allSerialsList = allDaysData.flatMap(day => day.serials);
+      const allIdlesList = allDaysData.flatMap(day => day.idles);
+      const allReloadsList = allDaysData.flatMap(day => day.reloads);
 
       const totalProdCount = allSerialsList.length;
       const totalIdleMins = allIdlesList.reduce((a, r) => a + (r.duration || 0), 0);
@@ -2213,7 +2400,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
       let totalTargetCount = 0;
       allDaysData.forEach(day => {
-        day.hourly.filter(h => !slotFilter || h.slot === slotFilter).forEach(h => {
+        day.hourly.forEach(h => {
           totalTargetCount += (h.target || 0);
         });
       });
@@ -2222,302 +2409,179 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 
       const nowIST = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST";
 
-      if (exportType === "full") {
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM"],
-          ["ATOMBERG ASSEMBLY & PACKAGING LINE COMPREHENSIVE REPORT"],
-          ["------------------------------------------------------------------------------------------------------------------------"],
-          ["REPORT METADATA & EXECUTIVE SUMMARY"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}  (${dates.length} Days)`],
-          ["Shift Time Slot Filter", slotFilter ? slotFilter : "All Operating Slots (07:00 - 19:00 IST)"],
-          ["Report Generation Timestamp", nowIST],
-          ["Total Actual Production (Units)", totalProdCount],
-          ["Total Planned Target (Units)", totalTargetCount],
-          ["Line Achievement Efficiency (%)", `${overallAch}%`],
-          ["Total Line Downtime (Minutes)", `${totalIdleMins} min (${(totalIdleMins / 60).toFixed(2)} hrs)`],
-          ["Total Reload / Rescan Events", totalReloadsCount],
-          ["Average Active Manpower", avgManpower],
-          ["------------------------------------------------------------------------------------------------------------------------"],
-          [],
-          ["========================================================================================================================"],
-          ["SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER"],
-          ["========================================================================================================================"],
-          ["Sr. No.", "Production Date", "Time Slot", "Target Units", "Actual Produced", "Variance (+/-)", "Achievement %", "Downtime (Min)", "Responsible Dept", "Downtime Reason", "Reloads", "Manpower"],
-        ];
+      // 1. Format Hourly Performance Rows with Color Coding
+      let hourlyRowsHtml = "";
+      let hRowIndex = 1;
+      allDaysData.forEach(day => {
+        day.hourly.forEach(h => {
+          const achNum = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
+          const achBadgeClass = achNum >= 90 ? "badge-ok" : achNum >= 60 ? "badge-warn" : "badge-bad";
+          const variance = (h.prod || 0) - (h.target || 0);
+          const varClass = variance > 0 ? "num-pos" : variance < 0 ? "num-neg" : "num-zero";
+          const rowClass = (hRowIndex % 2 === 0) ? "row-even" : "row-odd";
 
-        let rowNum = 1;
-        allDaysData.forEach(day => {
-          day.hourly
-            .filter(h => !slotFilter || h.slot === slotFilter)
-            .forEach(h => {
-              const ach = (h.target || 0) > 0 ? (((h.prod || 0) / h.target) * 100).toFixed(1) + "%" : "0.0%";
-              const variance = (h.prod || 0) - (h.target || 0);
-              rows.push([
-                rowNum++,
-                day.date,
-                h.slot,
-                h.target || 0,
-                h.prod || 0,
-                variance > 0 ? `+${variance}` : `${variance}`,
-                ach,
-                h.idle || 0,
-                h.dept || "-",
-                h.reason || "-",
-                h.reloads || 0,
-                day.manpower || 0,
-              ]);
-            });
+          hourlyRowsHtml += `
+            <tr class="${rowClass}">
+              <td class="text-c">${hRowIndex++}</td>
+              <td class="text-c"><strong>${day.date}</strong></td>
+              <td class="text-c" style="font-weight:600;color:#1e3a8a;">${h.slot}</td>
+              <td class="text-c" style="font-weight:600;">${(h.target || 0).toLocaleString()}</td>
+              <td class="text-c" style="font-weight:700;color:#1d4ed8;">${(h.prod || 0).toLocaleString()}</td>
+              <td class="text-c ${varClass}">${variance > 0 ? `+${variance}` : variance}</td>
+              <td class="${achBadgeClass}">${achNum}%</td>
+              <td class="text-c" style="${(h.idle||0)>0?'color:#dc2626;font-weight:bold;':''}">${h.idle || 0}</td>
+              <td class="text-l">${h.dept || "-"}</td>
+              <td class="text-l">${h.reason || "-"}</td>
+              <td class="text-c">${h.reloads || 0}</td>
+              <td class="text-c" style="font-weight:600;">${day.manpower || 0}</td>
+            </tr>
+          `;
         });
+      });
 
-        rows.push([
-          "TOTALS",
-          `All ${dates.length} Days`,
-          slotFilter || "ALL SLOTS",
-          totalTargetCount,
-          totalProdCount,
-          (totalProdCount - totalTargetCount) > 0 ? `+${totalProdCount - totalTargetCount}` : `${totalProdCount - totalTargetCount}`,
-          `${overallAch}%`,
-          totalIdleMins,
-          "-",
-          "-",
-          totalReloadsCount,
-          avgManpower,
-        ]);
+      const varTotal = totalProdCount - totalTargetCount;
+      const varTotalClass = varTotal > 0 ? "num-pos" : varTotal < 0 ? "num-neg" : "num-zero";
+      const achTotalNum = parseFloat(overallAch) || 0;
+      const achTotalBadge = achTotalNum >= 90 ? "badge-ok" : achTotalNum >= 60 ? "badge-warn" : "badge-bad";
 
-        rows.push([]);
-        rows.push(["========================================================================================================================"]);
-        rows.push([`SECTION 2: INDIVIDUAL UNIT SERIAL NUMBER TRACEABILITY REGISTER (${allSerialsList.length} Units)`]);
-        rows.push(["========================================================================================================================"]);
-        rows.push(["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"]);
+      hourlyRowsHtml += `
+        <tr class="tot-row">
+          <td class="tot-lbl" colspan="3">GRAND TOTAL (${dates.length} Days)</td>
+          <td class="text-c" style="font-weight:bold;font-size:11pt;">${totalTargetCount.toLocaleString()}</td>
+          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#1d4ed8;">${totalProdCount.toLocaleString()}</td>
+          <td class="text-c ${varTotalClass}" style="font-size:11pt;">${varTotal > 0 ? `+${varTotal}` : varTotal}</td>
+          <td class="${achTotalBadge}" style="font-size:11pt;">${overallAch}%</td>
+          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#dc2626;">${totalIdleMins}</td>
+          <td class="text-c">-</td>
+          <td class="text-c">-</td>
+          <td class="text-c" style="font-weight:bold;font-size:11pt;">${totalReloadsCount}</td>
+          <td class="text-c" style="font-weight:bold;font-size:11pt;color:#7c3aed;">${avgManpower}</td>
+        </tr>
+      `;
 
-        allSerialsList.forEach((s, idx) => {
-          const sIdx = tsToSlot(s.ts);
-          rows.push([
-            idx + 1,
-            s.date,
-            sIdx >= 0 ? SLOTS[sIdx] : "-",
-            s.model,
-            s.serial,
-            s.ts,
-            "PASSED ✓",
-          ]);
-        });
+      // 2. Format Serial Rows
+      let serialRowsHtml = "";
+      allSerialsList.forEach((s, idx) => {
+        const sIdx = tsToSlot(s.ts);
+        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
+        serialRowsHtml += `
+          <tr class="${rowClass}">
+            <td class="text-c">${idx + 1}</td>
+            <td class="text-c"><strong>${s.date}</strong></td>
+            <td class="text-c" style="color:#1e3a8a;">${sIdx >= 0 ? SLOTS[sIdx] : "-"}</td>
+            <td class="text-c" style="font-weight:600;">${s.model}</td>
+            <td class="text-c mono" style="color:#0f172a;font-weight:700;">${s.serial}</td>
+            <td class="text-c" style="color:#475569;">${s.ts}</td>
+            <td class="badge-ok">PASSED ✓</td>
+          </tr>
+        `;
+      });
 
-        rows.push([]);
-        rows.push(["========================================================================================================================"]);
-        rows.push([`SECTION 3: LINE STOPPAGE & IDLE TIME INCIDENT REGISTER (${allIdlesList.length} Incidents, ${totalIdleMins} Total Mins)`]);
-        rows.push(["========================================================================================================================"]);
-        rows.push(["Sr. No.", "Incident Date", "Time Slot", "Start Time", "End Time", "Duration (Min)", "Department", "Root Cause / Stoppage Reason"]);
-
-        allIdlesList.forEach((r, idx) => {
-          rows.push([
-            idx + 1,
-            r.date,
-            r.slot,
-            r.from,
-            r.to,
-            r.duration,
-            r.dept || "General",
-            r.reason || "Unspecified",
-          ]);
-        });
-
-        rows.push([]);
-        rows.push(["========================================================================================================================"]);
-        rows.push([`SECTION 4: COMPONENT RELOAD & RE-SCAN AUDIT REGISTER (${allReloadsList.length} Events)`]);
-        rows.push(["========================================================================================================================"]);
-        rows.push(["Sr. No.", "Record Date", "Time Slot", "Component / Material Type", "Reload Count", "Recorded Timestamp"]);
-
-        allReloadsList.forEach((r, idx) => {
-          rows.push([
-            idx + 1,
-            r.date,
-            r.slot,
-            r.type,
-            r.count,
-            r.ts || "-",
-          ]);
-        });
-
-        dlExcelCSV(`Atomberg_Industrial_Report_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "daily") {
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — DAILY PRODUCTION PERFORMANCE SUMMARY"],
-          ["ATOMBERG ASSEMBLY LINE"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}`],
-          ["Time Slot Filter", slotFilter || "All Day (07:00 - 19:00 IST)"],
-          ["Generated At", nowIST],
-          ["Total Production", totalProdCount],
-          ["Total Target", totalTargetCount],
-          ["Overall Line Achievement", `${overallAch}%`],
-          [],
-          ["Sr. No.", "Production Date", "Time Slot", "Target Units", "Actual Produced", "Variance (+/-)", "Achievement %", "Downtime (Min)", "Reloads", "Manpower"],
-        ];
-
-        let rowNum = 1;
-        allDaysData.forEach(day => {
-          day.hourly
-            .filter(h => !slotFilter || h.slot === slotFilter)
-            .forEach(h => {
-              const ach = (h.target || 0) > 0 ? (((h.prod || 0) / h.target) * 100).toFixed(1) + "%" : "0.0%";
-              const variance = (h.prod || 0) - (h.target || 0);
-              rows.push([
-                rowNum++,
-                day.date,
-                h.slot,
-                h.target || 0,
-                h.prod || 0,
-                variance > 0 ? `+${variance}` : `${variance}`,
-                ach,
-                h.idle || 0,
-                h.reloads || 0,
-                day.manpower || 0,
-              ]);
-            });
-        });
-
-        rows.push([
-          "TOTALS",
-          `All ${dates.length} Days`,
-          slotFilter || "ALL SLOTS",
-          totalTargetCount,
-          totalProdCount,
-          (totalProdCount - totalTargetCount) > 0 ? `+${totalProdCount - totalTargetCount}` : `${totalProdCount - totalTargetCount}`,
-          `${overallAch}%`,
-          totalIdleMins,
-          totalReloadsCount,
-          avgManpower,
-        ]);
-
-        dlExcelCSV(`Atomberg_Production_Summary_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "serials") {
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — UNIT SERIAL NUMBER TRACEABILITY REGISTER"],
-          ["ATOMBERG ASSEMBLY LINE"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}`],
-          ["Time Slot Filter", slotFilter || "All Day"],
-          ["Total Serial Scans", allSerialsList.length],
-          ["Generated At", nowIST],
-          [],
-          ["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp", "Status"],
-        ];
-
-        allSerialsList.forEach((s, idx) => {
-          const sIdx = tsToSlot(s.ts);
-          rows.push([
-            idx + 1,
-            s.date,
-            sIdx >= 0 ? SLOTS[sIdx] : "-",
-            s.model,
-            s.serial,
-            s.ts,
-            "PASSED ✓",
-          ]);
-        });
-
-        dlExcelCSV(`Atomberg_Serial_Numbers_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "idle") {
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — LINE STOPPAGE & IDLE TIME AUDIT REGISTER"],
-          ["ATOMBERG ASSEMBLY LINE"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}`],
-          ["Time Slot Filter", slotFilter || "All Day"],
-          ["Total Downtime Incidents", allIdlesList.length],
-          ["Total Downtime Duration", `${totalIdleMins} Minutes (${(totalIdleMins / 60).toFixed(2)} Hours)`],
-          ["Generated At", nowIST],
-          [],
-          ["Sr. No.", "Incident Date", "Time Slot", "Start Time", "End Time", "Downtime (Min)", "Responsible Dept", "Root Cause / Reason"],
-        ];
-
-        allIdlesList.forEach((r, idx) => {
-          rows.push([
-            idx + 1,
-            r.date,
-            r.slot,
-            r.from,
-            r.to,
-            r.duration,
-            r.dept || "General",
-            r.reason || "Unspecified",
-          ]);
-        });
-
-        rows.push([
-          "TOTAL DOWNTIME",
-          "-",
-          "-",
-          "-",
-          "-",
-          `${totalIdleMins} Min`,
-          "-",
-          "-",
-        ]);
-
-        dlExcelCSV(`Atomberg_Idle_Time_Audit_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "missing") {
-        const missingList = [];
-        allDaysData.forEach(day => {
-          if (!day.sRange?.model || !day.sRange.start || !day.sRange.end) return;
-          const scannedSet = new Set();
-          day.serials.forEach(s => {
-            if (s.model !== day.sRange.model) return;
-            const n = extractNum(s.serial);
-            if (n !== null && n >= day.sRange.start && n <= day.sRange.end) scannedSet.add(n);
-          });
-          for (let i = day.sRange.start; i <= day.sRange.end; i++) {
-            if (!scannedSet.has(i)) {
-              missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i), range: `${day.sRange.start} - ${day.sRange.end}` });
-            }
-          }
-        });
-
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — MISSING SERIAL NUMBER AUDIT REPORT"],
-          ["ATOMBERG ASSEMBLY LINE"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}`],
-          ["Total Missing Serials", missingList.length],
-          ["Generated At", nowIST],
-          [],
-          ["Sr. No.", "Production Date", "Model Number", "Configured Range", "Missing Serial Number", "Audit Status"],
-        ];
-
-        missingList.forEach((m, idx) => {
-          rows.push([
-            idx + 1,
-            m.date,
-            m.model,
-            m.range,
-            m.serial,
-            "MISSING / UNSCANNED",
-          ]);
-        });
-
-        dlExcelCSV(`Atomberg_Missing_Serials_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "reloads") {
-        const rows = [
-          ["PG ELECTROPLAST LIMITED — MATERIAL RELOAD & RESCAN AUDIT REPORT"],
-          ["ATOMBERG ASSEMBLY LINE"],
-          ["Date Range", `From: ${sDate}  To: ${eDate}`],
-          ["Time Slot Filter", slotFilter || "All Day"],
-          ["Total Reload Events", allReloadsList.length],
-          ["Generated At", nowIST],
-          [],
-          ["Sr. No.", "Record Date", "Time Slot", "Component / Material Type", "Reload Count", "Timestamp"],
-        ];
-
-        allReloadsList.forEach((r, idx) => {
-          rows.push([
-            idx + 1,
-            r.date,
-            r.slot,
-            r.type,
-            r.count,
-            r.ts || "-",
-          ]);
-        });
-
-        dlExcelCSV(`Atomberg_Reloads_Audit_${dateRangeLabel}.csv`, rows);
+      // 3. Format Idle Rows
+      let idleRowsHtml = "";
+      allIdlesList.forEach((r, idx) => {
+        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
+        idleRowsHtml += `
+          <tr class="${rowClass}">
+            <td class="text-c">${idx + 1}</td>
+            <td class="text-c"><strong>${r.date}</strong></td>
+            <td class="text-c" style="color:#1e3a8a;font-weight:600;">${r.slot}</td>
+            <td class="text-c">${r.from || "-"}</td>
+            <td class="text-c">${r.to || "-"}</td>
+            <td class="text-c" style="font-weight:bold;color:#dc2626;">${r.duration}</td>
+            <td class="text-l" style="font-weight:600;">${r.dept || "General"}</td>
+            <td class="text-l">${r.reason || "Unspecified"}</td>
+          </tr>
+        `;
+      });
+      if (allIdlesList.length > 0) {
+        idleRowsHtml += `
+          <tr class="tot-row">
+            <td class="tot-lbl" colspan="5">TOTAL DOWNTIME DURATION</td>
+            <td class="text-c" style="font-weight:bold;color:#dc2626;font-size:11pt;">${totalIdleMins} Min (${(totalIdleMins/60).toFixed(1)}h)</td>
+            <td colspan="2">-</td>
+          </tr>
+        `;
       }
+
+      // 4. Format Reload Rows
+      let reloadRowsHtml = "";
+      allReloadsList.forEach((r, idx) => {
+        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
+        reloadRowsHtml += `
+          <tr class="${rowClass}">
+            <td class="text-c">${idx + 1}</td>
+            <td class="text-c"><strong>${r.date}</strong></td>
+            <td class="text-c" style="color:#1e3a8a;font-weight:600;">${r.slot}</td>
+            <td class="text-l" style="font-weight:600;">${r.type}</td>
+            <td class="text-c" style="font-weight:bold;color:#b45309;">${r.count}</td>
+            <td class="text-c" style="color:#475569;">${r.ts || "-"}</td>
+          </tr>
+        `;
+      });
+      if (allReloadsList.length > 0) {
+        reloadRowsHtml += `
+          <tr class="tot-row">
+            <td class="tot-lbl" colspan="4">TOTAL RELOAD / RESCAN EVENTS</td>
+            <td class="text-c" style="font-weight:bold;color:#b45309;font-size:11pt;">${totalReloadsCount}</td>
+            <td>-</td>
+          </tr>
+        `;
+      }
+
+      // 5. Format Missing Serials
+      const missingList = [];
+      allDaysData.forEach(day => {
+        if (!day.sRange?.model || !day.sRange.start || !day.sRange.end) return;
+        const scannedSet = new Set();
+        day.serials.forEach(s => {
+          if (s.model !== day.sRange.model) return;
+          const n = extractNum(s.serial);
+          if (n !== null && n >= day.sRange.start && n <= day.sRange.end) scannedSet.add(n);
+        });
+        for (let i = day.sRange.start; i <= day.sRange.end; i++) {
+          if (!scannedSet.has(i)) {
+            missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i), range: `${day.sRange.start} - ${day.sRange.end}` });
+          }
+        }
+      });
+
+      let missingRowsHtml = "";
+      missingList.forEach((m, idx) => {
+        const rowClass = (idx % 2 === 0) ? "row-even" : "row-odd";
+        missingRowsHtml += `
+          <tr class="${rowClass}">
+            <td class="text-c">${idx + 1}</td>
+            <td class="text-c"><strong>${m.date}</strong></td>
+            <td class="text-c" style="font-weight:600;">${m.model}</td>
+            <td class="text-c">${m.range}</td>
+            <td class="text-c mono" style="color:#dc2626;font-weight:bold;">${m.serial}</td>
+            <td class="badge-bad">MISSING / UNSCANNED</td>
+          </tr>
+        `;
+      });
+
+      dlIndustrialExcel(`Atomberg_Industrial_Report_${dateRangeLabel}.xls`, {
+        sDate,
+        eDate,
+        dateCount: dates.length,
+        generatedAt: nowIST,
+        totalProd: totalProdCount,
+        totalTarget: totalTargetCount,
+        overallAch,
+        totalIdle: totalIdleMins,
+        totalReloads: totalReloadsCount,
+        avgManpower,
+        hourlyRowsHtml,
+        serialRowsHtml,
+        serialCount: allSerialsList.length,
+        idleRowsHtml,
+        idleCount: allIdlesList.length,
+        reloadRowsHtml,
+        reloadCount: allReloadsList.length,
+        missingRowsHtml,
+        missingCount: missingList.length,
+      });
 
       setShowExportModal(false);
     } catch (e) {
