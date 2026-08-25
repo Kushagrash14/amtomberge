@@ -2308,11 +2308,11 @@ async function exportMultiTabExcel(filename, allDaysData, meta) {
     }
   };
 
-  // 1. Build Tab 1: Consolidated Summary
-  const wsMain = wb.addWorksheet("Consolidated Summary");
+  // 1. Build Tab 1: Summary
+  const wsMain = wb.addWorksheet("Summary");
   buildWorksheet(
     wsMain,
-    "Consolidated Executive Audit",
+    "Executive Audit Summary",
     `${meta.sDate} to ${meta.eDate} (${allDaysData.length} Days)`,
     allDaysData,
     true
