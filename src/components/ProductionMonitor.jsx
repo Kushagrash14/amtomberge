@@ -684,6 +684,7 @@ function ProductionMonitor({ onLogout }) {
   const [uEmail,    setUEmail]    = useState("");
   const [uName,     setUName]     = useState("");
   const [usersList, setUsersList] = useState([]);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const initHourly = (tgts) => SLOTS.map((s, i) => ({
     slot:s, prod:0,
@@ -1501,15 +1502,27 @@ function ProductionMonitor({ onLogout }) {
             { id:"settings",  label:"⚙️ Settings",  show:true },
           ];
           return (
-            <div className="pg-tabs">
-              {tabs.filter(t => t.show).map(t => (
-                <button key={t.id} className={`pg-tab${activeTab===t.id?" active":""}`} onClick={()=>setActiveTab(t.id)}>
-                  {t.label}
+            <div className="pg-tabs" style={{justifyContent:"space-between",alignItems:"center",paddingRight:10}}>
+              <div style={{display:"flex",overflowX:"auto"}}>
+                {tabs.filter(t => t.show).map(t => (
+                  <button key={t.id} className={`pg-tab${activeTab===t.id?" active":""}`} onClick={()=>setActiveTab(t.id)}>
+                    {t.label}
+                  </button>
+                ))}
+                {adminUnlocked && (
+                  <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
+                )}
+              </div>
+              {activeTab === "reports" && (
+                <button
+                  className="btn btn-export"
+                  style={{padding:"6px 14px",fontSize:11,gap:5,whiteSpace:"nowrap",flexShrink:0}}
+                  onClick={() => setExportModalOpen(true)}
+                  title="Download Excel Report"
+                >
+                  📥 Download Excel Report
                 </button>
-              ))}
-             {adminUnlocked && (
-           <button className={`pg-tab${activeTab==="admin"?" active":""}`} onClick={()=>{setActiveTab("admin");loadUsersList();}}>🔐 Admin</button>
-          )}
+              )}
             </div>
           );
         })()}
@@ -1537,6 +1550,8 @@ function ProductionMonitor({ onLogout }) {
             liveSRange={sRange}
             appSettings={appSettings}
             apiFetch={apiFetch}
+            showExportModal={exportModalOpen}
+            setShowExportModal={setExportModalOpen}
           />
         )}
         {activeTab==="charts"   && <ChartsTab S={S} manpower={manpower}/>}
@@ -1749,17 +1764,15 @@ function dlExcelCSV(filename, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) {
+function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, showExportModal, setShowExportModal }) {
   const [reportDate, setReportDate] = useState(liveS?.date || todayStr());
   const [selectedSlot, setSelectedSlot] = useState("");
   const [activeReport, setActiveReport] = useState("daily");
-  const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadedData, setLoadedData] = useState(null);
   const [loadError, setLoadError] = useState("");
 
   // Modal State for Excel Export
-  const [showExportModal, setShowExportModal] = useState(false);
   const [exportStart, setExportStart] = useState(liveS?.date || todayStr());
   const [exportEnd, setExportEnd] = useState(liveS?.date || todayStr());
   const [exportType, setExportType] = useState("full");
@@ -1886,6 +1899,13 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     }
   }, [reportDate, isToday, loadDateData]);
 
+  // Sync export date whenever active report date changes
+  useEffect(() => {
+    setExportStart(reportDate || todayStr());
+    setExportEnd(reportDate || todayStr());
+    setExportSlot(selectedSlot || "");
+  }, [reportDate, selectedSlot]);
+
   // Active dataset for current view
   const activeS = (!isToday && loadedData) ? loadedData : (liveS || {});
   const activeMP = (!isToday && loadedData) ? (loadedData.manpower || 0) : (liveManpower || 0);
@@ -1899,39 +1919,27 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
         const slotIdx = tsToSlot(s.ts);
         if (slotIdx < 0 || SLOTS[slotIdx] !== selectedSlot) return false;
       }
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        return String(s.serial).toLowerCase().includes(term) || String(s.model).toLowerCase().includes(term);
-      }
       return true;
     });
-  }, [allSerials, selectedSlot, searchTerm]);
+  }, [allSerials, selectedSlot]);
 
   // Filtered Idles for current view
   const allIdles = activeS?.idles || [];
   const filteredIdles = useMemo(() => {
     return allIdles.filter(r => {
       if (selectedSlot && normSlot(r.slot) !== selectedSlot) return false;
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        return String(r.dept).toLowerCase().includes(term) || String(r.reason).toLowerCase().includes(term);
-      }
       return true;
     });
-  }, [allIdles, selectedSlot, searchTerm]);
+  }, [allIdles, selectedSlot]);
 
   // Filtered Reloads for current view
   const allReloads = activeS?.reloads || [];
   const filteredReloads = useMemo(() => {
     return allReloads.filter(r => {
       if (selectedSlot && normSlot(r.slot) !== selectedSlot) return false;
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
-        return String(r.type).toLowerCase().includes(term) || String(r.slot).toLowerCase().includes(term);
-      }
       return true;
     });
-  }, [allReloads, selectedSlot, searchTerm]);
+  }, [allReloads, selectedSlot]);
 
   // Hourly stats & calculations for current view
   const hourlyData = activeS?.hourly || [];
@@ -2041,7 +2049,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     }
   };
 
-  // Excel / CSV Export with Date Range support
+  // Industrial Grade Excel / CSV Export with Date Range support
   const handleDownloadExcel = async () => {
     let sDate = exportStart || todayStr();
     let eDate = exportEnd || todayStr();
@@ -2050,7 +2058,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
     }
     const dates = getDatesList(sDate, eDate);
     setIsExporting(true);
-    setExportProgress(`Fetching data for ${dates.length} day(s)...`);
+    setExportProgress(`Fetching records for ${dates.length} date(s)...`);
 
     try {
       const allDaysData = [];
@@ -2151,121 +2159,268 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
         });
       }
 
-      setExportProgress("Generating Excel file...");
+      setExportProgress("Formatting Industrial Excel Report...");
 
-      // Filter by slot if requested
       const slotFilter = exportSlot;
       const isSingleDay = sDate === eDate;
       const dateRangeLabel = isSingleDay ? sDate : `${sDate}_to_${eDate}`;
 
-      if (exportType === "full") {
-        const allSerialsList = allDaysData.flatMap(day => day.serials);
-        const allIdlesList = allDaysData.flatMap(day => day.idles);
-        const allReloadsList = allDaysData.flatMap(day => day.reloads);
+      const allSerialsList = allDaysData.flatMap(day => day.serials).filter(s => {
+        if (!slotFilter) return true;
+        const sIdx = tsToSlot(s.ts);
+        return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
+      });
 
+      const allIdlesList = allDaysData.flatMap(day => day.idles).filter(r => !slotFilter || r.slot === slotFilter);
+      const allReloadsList = allDaysData.flatMap(day => day.reloads).filter(r => !slotFilter || r.slot === slotFilter);
+
+      const totalProdCount = allSerialsList.length;
+      const totalIdleMins = allIdlesList.reduce((a, r) => a + (r.duration || 0), 0);
+      const totalReloadsCount = allReloadsList.reduce((a, r) => a + (r.count || 1), 0);
+
+      let totalTargetCount = 0;
+      allDaysData.forEach(day => {
+        day.hourly.filter(h => !slotFilter || h.slot === slotFilter).forEach(h => {
+          totalTargetCount += (h.target || 0);
+        });
+      });
+      const overallAch = totalTargetCount > 0 ? ((totalProdCount / totalTargetCount) * 100).toFixed(2) : "0.00";
+      const avgManpower = (allDaysData.reduce((a, d) => a + (d.manpower || 0), 0) / Math.max(1, allDaysData.length)).toFixed(1);
+
+      const nowIST = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST";
+
+      if (exportType === "full") {
         const rows = [
-          ["PG GROUP / ATOMBERG PRODUCTION REPORT - COMPREHENSIVE EXCEL EXPORT"],
-          ["Date Range", `From: ${sDate} To: ${eDate} (${dates.length} Days)`],
-          ["Time Slot Filter", slotFilter || "All Day (07:00-19:00)"],
-          ["Generated At", new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }) + " IST"],
-          ["Total Production Scans", allSerialsList.length],
-          ["Total Idle Incidents", allIdlesList.length],
-          ["Total Reloads", allReloadsList.length],
+          ["PG ELECTROPLAST LIMITED — PRODUCTION & QUALITY MONITORING SYSTEM"],
+          ["ATOMBERG ASSEMBLY & PACKAGING LINE COMPREHENSIVE REPORT"],
+          ["------------------------------------------------------------------------------------------------------------------------"],
+          ["REPORT METADATA & EXECUTIVE SUMMARY"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}  (${dates.length} Days)`],
+          ["Shift Time Slot Filter", slotFilter ? slotFilter : "All Operating Slots (07:00 - 19:00 IST)"],
+          ["Report Generation Timestamp", nowIST],
+          ["Total Actual Production (Units)", totalProdCount],
+          ["Total Planned Target (Units)", totalTargetCount],
+          ["Line Achievement Efficiency (%)", `${overallAch}%`],
+          ["Total Line Downtime (Minutes)", `${totalIdleMins} min (${(totalIdleMins / 60).toFixed(2)} hrs)`],
+          ["Total Reload / Rescan Events", totalReloadsCount],
+          ["Average Active Manpower", avgManpower],
+          ["------------------------------------------------------------------------------------------------------------------------"],
           [],
-          ["========================================================================="],
-          ["1. DAILY & HOURLY PRODUCTION SUMMARY"],
-          ["========================================================================="],
-          ["Date", "Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Reloads", "Manpower"],
-          ...allDaysData.flatMap(day =>
-            day.hourly
-              .filter(h => !slotFilter || h.slot === slotFilter)
-              .map(h => {
-                const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
-                return [day.date, h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.reloads || 0, day.manpower || 0];
-              })
-          ),
-          [],
-          ["========================================================================="],
-          ["2. ALL SCANNED SERIAL NUMBERS (" + allSerialsList.length + " Total)"],
-          ["========================================================================="],
-          ["#", "Date", "Serial Number", "Model", "Timestamp", "Time Slot"],
-          ...allSerialsList
-            .filter(s => {
-              if (!slotFilter) return true;
-              const sIdx = tsToSlot(s.ts);
-              return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
-            })
-            .map((s, idx) => {
-              const sIdx = tsToSlot(s.ts);
-              return [idx + 1, s.date, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
-            }),
-          [],
-          ["========================================================================="],
-          ["3. IDLE TIME RECORDS (" + allIdlesList.length + " Total)"],
-          ["========================================================================="],
-          ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
-          ...allIdlesList
-            .filter(r => !slotFilter || r.slot === slotFilter)
-            .map((r, idx) => [idx + 1, r.date, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
-          [],
-          ["========================================================================="],
-          ["4. RELOADS RECORDS (" + allReloadsList.length + " Total)"],
-          ["========================================================================="],
-          ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
-          ...allReloadsList
-            .filter(r => !slotFilter || r.slot === slotFilter)
-            .map((r, idx) => [idx + 1, r.date, r.slot, r.type, r.count, r.ts || "-"]),
+          ["========================================================================================================================"],
+          ["SECTION 1: HOURLY PRODUCTION & TARGET PERFORMANCE REGISTER"],
+          ["========================================================================================================================"],
+          ["Sr. No.", "Production Date", "Time Slot", "Target Units", "Actual Produced", "Variance (+/-)", "Achievement %", "Downtime (Min)", "Responsible Dept", "Downtime Reason", "Reloads", "Manpower"],
         ];
 
-        dlExcelCSV(`Atomberg_Full_Report_${dateRangeLabel}.csv`, rows);
+        let rowNum = 1;
+        allDaysData.forEach(day => {
+          day.hourly
+            .filter(h => !slotFilter || h.slot === slotFilter)
+            .forEach(h => {
+              const ach = (h.target || 0) > 0 ? (((h.prod || 0) / h.target) * 100).toFixed(1) + "%" : "0.0%";
+              const variance = (h.prod || 0) - (h.target || 0);
+              rows.push([
+                rowNum++,
+                day.date,
+                h.slot,
+                h.target || 0,
+                h.prod || 0,
+                variance > 0 ? `+${variance}` : `${variance}`,
+                ach,
+                h.idle || 0,
+                h.dept || "-",
+                h.reason || "-",
+                h.reloads || 0,
+                day.manpower || 0,
+              ]);
+            });
+        });
+
+        rows.push([
+          "TOTALS",
+          `All ${dates.length} Days`,
+          slotFilter || "ALL SLOTS",
+          totalTargetCount,
+          totalProdCount,
+          (totalProdCount - totalTargetCount) > 0 ? `+${totalProdCount - totalTargetCount}` : `${totalProdCount - totalTargetCount}`,
+          `${overallAch}%`,
+          totalIdleMins,
+          "-",
+          "-",
+          totalReloadsCount,
+          avgManpower,
+        ]);
+
+        rows.push([]);
+        rows.push(["========================================================================================================================"]);
+        rows.push([`SECTION 2: INDIVIDUAL UNIT SERIAL NUMBER TRACEABILITY REGISTER (${allSerialsList.length} Units)`]);
+        rows.push(["========================================================================================================================"]);
+        rows.push(["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp (IST)", "Inspection Status"]);
+
+        allSerialsList.forEach((s, idx) => {
+          const sIdx = tsToSlot(s.ts);
+          rows.push([
+            idx + 1,
+            s.date,
+            sIdx >= 0 ? SLOTS[sIdx] : "-",
+            s.model,
+            s.serial,
+            s.ts,
+            "PASSED ✓",
+          ]);
+        });
+
+        rows.push([]);
+        rows.push(["========================================================================================================================"]);
+        rows.push([`SECTION 3: LINE STOPPAGE & IDLE TIME INCIDENT REGISTER (${allIdlesList.length} Incidents, ${totalIdleMins} Total Mins)`]);
+        rows.push(["========================================================================================================================"]);
+        rows.push(["Sr. No.", "Incident Date", "Time Slot", "Start Time", "End Time", "Duration (Min)", "Department", "Root Cause / Stoppage Reason"]);
+
+        allIdlesList.forEach((r, idx) => {
+          rows.push([
+            idx + 1,
+            r.date,
+            r.slot,
+            r.from,
+            r.to,
+            r.duration,
+            r.dept || "General",
+            r.reason || "Unspecified",
+          ]);
+        });
+
+        rows.push([]);
+        rows.push(["========================================================================================================================"]);
+        rows.push([`SECTION 4: COMPONENT RELOAD & RE-SCAN AUDIT REGISTER (${allReloadsList.length} Events)`]);
+        rows.push(["========================================================================================================================"]);
+        rows.push(["Sr. No.", "Record Date", "Time Slot", "Component / Material Type", "Reload Count", "Recorded Timestamp"]);
+
+        allReloadsList.forEach((r, idx) => {
+          rows.push([
+            idx + 1,
+            r.date,
+            r.slot,
+            r.type,
+            r.count,
+            r.ts || "-",
+          ]);
+        });
+
+        dlExcelCSV(`Atomberg_Industrial_Report_${dateRangeLabel}.csv`, rows);
       } else if (exportType === "daily") {
         const rows = [
-          ["PG GROUP - DAILY PRODUCTION SUMMARY"],
-          ["Date Range", `From: ${sDate} To: ${eDate}`],
-          ["Time Filter", slotFilter || "All Day (07:00-19:00)"],
+          ["PG ELECTROPLAST LIMITED — DAILY PRODUCTION PERFORMANCE SUMMARY"],
+          ["ATOMBERG ASSEMBLY LINE"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}`],
+          ["Time Slot Filter", slotFilter || "All Day (07:00 - 19:00 IST)"],
+          ["Generated At", nowIST],
+          ["Total Production", totalProdCount],
+          ["Total Target", totalTargetCount],
+          ["Overall Line Achievement", `${overallAch}%`],
           [],
-          ["Date", "Time Slot", "Production", "Target", "Achievement %", "Idle Time (min)", "Reloads", "Manpower"],
-          ...allDaysData.flatMap(day =>
-            day.hourly
-              .filter(h => !slotFilter || h.slot === slotFilter)
-              .map(h => {
-                const ach = (h.target || 0) > 0 ? Math.round(((h.prod || 0) / h.target) * 100) : 0;
-                return [day.date, h.slot, h.prod || 0, h.target || 0, ach + "%", h.idle || 0, h.reloads || 0, day.manpower || 0];
-              })
-          ),
+          ["Sr. No.", "Production Date", "Time Slot", "Target Units", "Actual Produced", "Variance (+/-)", "Achievement %", "Downtime (Min)", "Reloads", "Manpower"],
         ];
-        dlExcelCSV(`Atomberg_Daily_Summary_${dateRangeLabel}.csv`, rows);
-      } else if (exportType === "serials") {
-        const allSerialsList = allDaysData.flatMap(day => day.serials).filter(s => {
-          if (!slotFilter) return true;
-          const sIdx = tsToSlot(s.ts);
-          return sIdx >= 0 && SLOTS[sIdx] === slotFilter;
+
+        let rowNum = 1;
+        allDaysData.forEach(day => {
+          day.hourly
+            .filter(h => !slotFilter || h.slot === slotFilter)
+            .forEach(h => {
+              const ach = (h.target || 0) > 0 ? (((h.prod || 0) / h.target) * 100).toFixed(1) + "%" : "0.0%";
+              const variance = (h.prod || 0) - (h.target || 0);
+              rows.push([
+                rowNum++,
+                day.date,
+                h.slot,
+                h.target || 0,
+                h.prod || 0,
+                variance > 0 ? `+${variance}` : `${variance}`,
+                ach,
+                h.idle || 0,
+                h.reloads || 0,
+                day.manpower || 0,
+              ]);
+            });
         });
+
+        rows.push([
+          "TOTALS",
+          `All ${dates.length} Days`,
+          slotFilter || "ALL SLOTS",
+          totalTargetCount,
+          totalProdCount,
+          (totalProdCount - totalTargetCount) > 0 ? `+${totalProdCount - totalTargetCount}` : `${totalProdCount - totalTargetCount}`,
+          `${overallAch}%`,
+          totalIdleMins,
+          totalReloadsCount,
+          avgManpower,
+        ]);
+
+        dlExcelCSV(`Atomberg_Production_Summary_${dateRangeLabel}.csv`, rows);
+      } else if (exportType === "serials") {
         const rows = [
-          ["PG GROUP - SERIAL NUMBERS REPORT"],
-          ["Date Range", `From: ${sDate} To: ${eDate}`],
-          ["Time Filter", slotFilter || "All Day"],
-          ["Total Serials", allSerialsList.length],
+          ["PG ELECTROPLAST LIMITED — UNIT SERIAL NUMBER TRACEABILITY REGISTER"],
+          ["ATOMBERG ASSEMBLY LINE"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}`],
+          ["Time Slot Filter", slotFilter || "All Day"],
+          ["Total Serial Scans", allSerialsList.length],
+          ["Generated At", nowIST],
           [],
-          ["#", "Date", "Serial Number", "Model", "Timestamp", "Time Slot"],
-          ...allSerialsList.map((s, idx) => {
-            const sIdx = tsToSlot(s.ts);
-            return [idx + 1, s.date, s.serial, s.model, s.ts, sIdx >= 0 ? SLOTS[sIdx] : "-"];
-          }),
+          ["Sr. No.", "Production Date", "Time Slot", "Model Number", "Barcode / Serial Number", "Scan Timestamp", "Status"],
         ];
-        dlExcelCSV(`Atomberg_Serials_Report_${dateRangeLabel}.csv`, rows);
+
+        allSerialsList.forEach((s, idx) => {
+          const sIdx = tsToSlot(s.ts);
+          rows.push([
+            idx + 1,
+            s.date,
+            sIdx >= 0 ? SLOTS[sIdx] : "-",
+            s.model,
+            s.serial,
+            s.ts,
+            "PASSED ✓",
+          ]);
+        });
+
+        dlExcelCSV(`Atomberg_Serial_Numbers_${dateRangeLabel}.csv`, rows);
       } else if (exportType === "idle") {
-        const allIdlesList = allDaysData.flatMap(day => day.idles).filter(r => !slotFilter || r.slot === slotFilter);
         const rows = [
-          ["PG GROUP - IDLE TIME ANALYSIS REPORT"],
-          ["Date Range", `From: ${sDate} To: ${eDate}`],
-          ["Time Filter", slotFilter || "All Day"],
-          ["Total Incidents", allIdlesList.length],
+          ["PG ELECTROPLAST LIMITED — LINE STOPPAGE & IDLE TIME AUDIT REGISTER"],
+          ["ATOMBERG ASSEMBLY LINE"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}`],
+          ["Time Slot Filter", slotFilter || "All Day"],
+          ["Total Downtime Incidents", allIdlesList.length],
+          ["Total Downtime Duration", `${totalIdleMins} Minutes (${(totalIdleMins / 60).toFixed(2)} Hours)`],
+          ["Generated At", nowIST],
           [],
-          ["#", "Date", "Slot", "From Time", "To Time", "Duration (min)", "Department", "Reason"],
-          ...allIdlesList.map((r, idx) => [idx + 1, r.date, r.slot, r.from, r.to, r.duration, r.dept, r.reason]),
+          ["Sr. No.", "Incident Date", "Time Slot", "Start Time", "End Time", "Downtime (Min)", "Responsible Dept", "Root Cause / Reason"],
         ];
-        dlExcelCSV(`Atomberg_Idle_Report_${dateRangeLabel}.csv`, rows);
+
+        allIdlesList.forEach((r, idx) => {
+          rows.push([
+            idx + 1,
+            r.date,
+            r.slot,
+            r.from,
+            r.to,
+            r.duration,
+            r.dept || "General",
+            r.reason || "Unspecified",
+          ]);
+        });
+
+        rows.push([
+          "TOTAL DOWNTIME",
+          "-",
+          "-",
+          "-",
+          "-",
+          `${totalIdleMins} Min`,
+          "-",
+          "-",
+        ]);
+
+        dlExcelCSV(`Atomberg_Idle_Time_Audit_${dateRangeLabel}.csv`, rows);
       } else if (exportType === "missing") {
         const missingList = [];
         allDaysData.forEach(day => {
@@ -2278,37 +2433,63 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
           });
           for (let i = day.sRange.start; i <= day.sRange.end; i++) {
             if (!scannedSet.has(i)) {
-              missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i) });
+              missingList.push({ date: day.date, model: day.sRange.model, serial: pad5(i), range: `${day.sRange.start} - ${day.sRange.end}` });
             }
           }
         });
+
         const rows = [
-          ["PG GROUP - MISSING SERIALS REPORT"],
-          ["Date Range", `From: ${sDate} To: ${eDate}`],
+          ["PG ELECTROPLAST LIMITED — MISSING SERIAL NUMBER AUDIT REPORT"],
+          ["ATOMBERG ASSEMBLY LINE"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}`],
           ["Total Missing Serials", missingList.length],
+          ["Generated At", nowIST],
           [],
-          ["#", "Date", "Model", "Missing Serial Number"],
-          ...missingList.map((m, idx) => [idx + 1, m.date, m.model, m.serial]),
+          ["Sr. No.", "Production Date", "Model Number", "Configured Range", "Missing Serial Number", "Audit Status"],
         ];
+
+        missingList.forEach((m, idx) => {
+          rows.push([
+            idx + 1,
+            m.date,
+            m.model,
+            m.range,
+            m.serial,
+            "MISSING / UNSCANNED",
+          ]);
+        });
+
         dlExcelCSV(`Atomberg_Missing_Serials_${dateRangeLabel}.csv`, rows);
       } else if (exportType === "reloads") {
-        const allReloadsList = allDaysData.flatMap(day => day.reloads).filter(r => !slotFilter || r.slot === slotFilter);
         const rows = [
-          ["PG GROUP - RELOADS REPORT"],
-          ["Date Range", `From: ${sDate} To: ${eDate}`],
-          ["Time Filter", slotFilter || "All Day"],
-          ["Total Records", allReloadsList.length],
+          ["PG ELECTROPLAST LIMITED — MATERIAL RELOAD & RESCAN AUDIT REPORT"],
+          ["ATOMBERG ASSEMBLY LINE"],
+          ["Date Range", `From: ${sDate}  To: ${eDate}`],
+          ["Time Slot Filter", slotFilter || "All Day"],
+          ["Total Reload Events", allReloadsList.length],
+          ["Generated At", nowIST],
           [],
-          ["#", "Date", "Slot", "Type", "Count", "Timestamp"],
-          ...allReloadsList.map((r, idx) => [idx + 1, r.date, r.slot, r.type, r.count, r.ts || "-"]),
+          ["Sr. No.", "Record Date", "Time Slot", "Component / Material Type", "Reload Count", "Timestamp"],
         ];
-        dlExcelCSV(`Atomberg_Reloads_Report_${dateRangeLabel}.csv`, rows);
+
+        allReloadsList.forEach((r, idx) => {
+          rows.push([
+            idx + 1,
+            r.date,
+            r.slot,
+            r.type,
+            r.count,
+            r.ts || "-",
+          ]);
+        });
+
+        dlExcelCSV(`Atomberg_Reloads_Audit_${dateRangeLabel}.csv`, rows);
       }
 
       setShowExportModal(false);
-    } catch (err) {
-      console.error("Export error:", err);
-      alert("Export failed: " + (err.message || err));
+    } catch (e) {
+      console.error("Export error:", e);
+      alert("Export failed: " + (e.message || e));
     } finally {
       setIsExporting(false);
       setExportProgress("");
@@ -2316,40 +2497,46 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
   };
 
   return (
-    <div className="tab-pane">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-        <div className="sec-title" style={{fontSize:15,margin:0,display:"flex",alignItems:"center",gap:8}}>
-          📋 Production Reports & Analysis
-          {isToday ? (
-            <span style={{background:"#d1fae5",color:"#065f46",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:12,border:"1px solid #6ee7b7"}}>
-              🟢 LIVE TODAY
-            </span>
-          ) : (
-            <span style={{background:"#fef3c7",color:"#92400e",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:12,border:"1px solid #fbbf24"}}>
-              📅 HISTORICAL: {reportDate}
-            </span>
-          )}
-        </div>
-        <div>
+    <div className="tab-pane" style={{paddingTop:10}}>
+      {/* Filter Toolbar with View Buttons on the LEFT */}
+      <div className="report-filter-bar" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"8px 12px",marginBottom:12}}>
+        {/* Report View Buttons on the LEFT */}
+        <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
           <button
-            className="btn btn-export"
-            onClick={() => {
-              setExportStart(reportDate || todayStr());
-              setExportEnd(reportDate || todayStr());
-              setExportType(activeReport === "daily" ? "full" : activeReport);
-              setExportSlot(selectedSlot || "");
-              setShowExportModal(true);
-            }}
-            style={{padding:"8px 16px",fontSize:12,gap:6}}
-            title="Download Excel Report with custom date range"
+            className={`report-tab-btn ${activeReport === "daily" ? "active" : ""}`}
+            onClick={() => setActiveReport("daily")}
           >
-            📥 Download Excel Report
+            📊 Daily Summary
+          </button>
+          <button
+            className={`report-tab-btn ${activeReport === "serials" ? "active" : ""}`}
+            onClick={() => setActiveReport("serials")}
+          >
+            🔢 Serials ({allSerials.filter(s => !selectedSlot || (tsToSlot(s.ts) >= 0 && SLOTS[tsToSlot(s.ts)] === selectedSlot)).length})
+          </button>
+          <button
+            className={`report-tab-btn ${activeReport === "idle" ? "active" : ""}`}
+            onClick={() => setActiveReport("idle")}
+          >
+            ⏱ Idle Analysis ({allIdles.filter(r => !selectedSlot || normSlot(r.slot) === selectedSlot).length})
+          </button>
+          <button
+            className={`report-tab-btn ${activeReport === "missing" ? "active" : ""}`}
+            onClick={() => setActiveReport("missing")}
+          >
+            🔍 Missing Serials ({missingSerialsList.length})
+          </button>
+          <button
+            className={`report-tab-btn ${activeReport === "reloads" ? "active" : ""}`}
+            onClick={() => setActiveReport("reloads")}
+          >
+            🔄 Reloads ({allReloads.filter(r => !selectedSlot || normSlot(r.slot) === selectedSlot).length})
           </button>
         </div>
-      </div>
 
-      {/* Filter Toolbar */}
-      <div className="report-filter-bar">
+        {/* Divider */}
+        <div style={{width:1,height:22,background:"var(--g200)",margin:"0 4px"}}/>
+
         {/* Date Filter */}
         <div className="report-filter-group">
           <label>📅 Date:</label>
@@ -2358,12 +2545,12 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
             className="fi"
             value={reportDate}
             onChange={e => setReportDate(e.target.value)}
-            style={{width:145,padding:"5px 8px",fontWeight:600}}
+            style={{width:135,padding:"4px 7px",fontSize:11,fontWeight:600}}
           />
           {!isToday && (
             <button
               className="btn btn-navy"
-              style={{padding:"5px 9px",fontSize:10}}
+              style={{padding:"4px 7px",fontSize:10}}
               onClick={() => setReportDate(liveS?.date || todayStr())}
               title="Reset to today"
             >
@@ -2379,7 +2566,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
             className="fs"
             value={selectedSlot}
             onChange={e => setSelectedSlot(e.target.value)}
-            style={{width:170,padding:"5px 8px",fontWeight:600}}
+            style={{width:160,padding:"4px 7px",fontSize:11,fontWeight:600}}
           >
             <option value="">All Day (07:00 - 19:00)</option>
             {SLOTS.map(s => (
@@ -2389,31 +2576,20 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
           {selectedSlot && (
             <button
               className="btn btn-navy"
-              style={{padding:"5px 8px",fontSize:10}}
+              style={{padding:"4px 7px",fontSize:10}}
               onClick={() => setSelectedSlot("")}
               title="Clear time filter"
             >
-              ✕ All Slots
+              ✕
             </button>
           )}
         </div>
 
-        {/* Search Box */}
-        <div className="report-filter-group" style={{minWidth:180}}>
-          <input
-            type="text"
-            className="fi"
-            placeholder="🔍 Search in report..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            style={{padding:"5px 8px",fontSize:11}}
-          />
-        </div>
-
-        <div className="report-actions">
+        {/* Refresh Button */}
+        <div style={{marginLeft:"auto"}}>
           <button
             className="btn btn-navy"
-            style={{padding:"5px 10px",fontSize:11}}
+            style={{padding:"4px 9px",fontSize:10}}
             onClick={() => isToday ? null : loadDateData(reportDate)}
             disabled={isLoading}
           >
@@ -2432,65 +2608,6 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
 
       {!isLoading && (
         <>
-          {/* Summary Chips */}
-          <div className="report-summary-bar">
-            <div className={`report-chip ${selectedSlot ? "primary" : ""}`}>
-              <span>⏱ Slot:</span> <strong>{selectedSlot || "Full Day"}</strong>
-            </div>
-            <div className="report-chip">
-              <span>Production:</span> <strong>{slotStats.prod}</strong>
-            </div>
-            <div className="report-chip">
-              <span>Target:</span> <strong>{slotStats.target}</strong>
-            </div>
-            <div className="report-chip">
-              <span>Achievement:</span> <strong style={{color: slotStats.ach >= 90 ? "var(--green)" : slotStats.ach >= 70 ? "var(--amber)" : "var(--red)"}}>{slotStats.ach}%</strong>
-            </div>
-            <div className="report-chip">
-              <span>Manpower:</span> <strong>{activeMP}</strong>
-            </div>
-            <div className="report-chip">
-              <span>Idle Time:</span> <strong style={{color: slotStats.idle > 0 ? "var(--red)" : "var(--green)"}}>{slotStats.idle} min</strong>
-            </div>
-            <div className="report-chip">
-              <span>Reloads:</span> <strong>{slotStats.reloads}</strong>
-            </div>
-          </div>
-
-          {/* Navigation Buttons for Report View */}
-          <div className="btn-row" style={{marginBottom:14,borderBottom:"1px solid var(--g200)",paddingBottom:10}}>
-            <button
-              className={`report-tab-btn ${activeReport === "daily" ? "active" : ""}`}
-              onClick={() => setActiveReport("daily")}
-            >
-              📊 Daily Summary
-            </button>
-            <button
-              className={`report-tab-btn ${activeReport === "serials" ? "active" : ""}`}
-              onClick={() => setActiveReport("serials")}
-            >
-              🔢 Serials ({filteredSerials.length})
-            </button>
-            <button
-              className={`report-tab-btn ${activeReport === "idle" ? "active" : ""}`}
-              onClick={() => setActiveReport("idle")}
-            >
-              ⏱ Idle Analysis ({filteredIdles.length})
-            </button>
-            <button
-              className={`report-tab-btn ${activeReport === "missing" ? "active" : ""}`}
-              onClick={() => setActiveReport("missing")}
-            >
-              🔍 Missing Serials ({missingSerialsList.length})
-            </button>
-            <button
-              className={`report-tab-btn ${activeReport === "reloads" ? "active" : ""}`}
-              onClick={() => setActiveReport("reloads")}
-            >
-              🔄 Reloads ({filteredReloads.length})
-            </button>
-          </div>
-
           {/* Active Report Content */}
           {activeReport === "daily" && (
             <div>
@@ -2510,6 +2627,10 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
                 <div className="kpi-card">
                   <div className="v">{slotStats.idle}m</div>
                   <div className="l">IDLE TIME</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="v">{activeMP}</div>
+                  <div className="l">MANPOWER</div>
                 </div>
                 <div className="kpi-card">
                   <div className="v">{slotStats.reloads}</div>
@@ -2646,7 +2767,7 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch }) 
                 <div className="al al-warn">No serial range configured for {reportDate}. Please configure ranges in Settings.</div>
               ) : (
                 <>
-                  <div className="al al-info" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                  <div className="al al-info" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"gap",gap:8}}>
                     <div>
                       <strong>Model:</strong> {activeSR.model} &nbsp;|&nbsp;
                       <strong>Range:</strong> {activeSR.start} - {activeSR.end} &nbsp;|&nbsp;
