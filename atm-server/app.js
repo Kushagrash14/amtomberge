@@ -1,5 +1,8 @@
-import express from 'express';
 import dotenv from 'dotenv';
+
+dotenv.config();
+
+import express from 'express';
 import cors from 'cors';
 
 import indexRouter from './routes/index.js';
@@ -8,8 +11,8 @@ import apiRouter from './routes/api.route.js';
 import productionRouter from './routes/production.route.js';
 import connectDB from './db/config/sql.config.js';
 import insertUser from './middleware/insertUser.js';
+import qzRoutes from "./routes/qz.routes.js";
 
-dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -90,6 +93,7 @@ mountApi('', indexRouter);
 mountApi('/auth', authRouter);
 mountApi('', apiRouter);
 mountApi('/production', productionRouter);
+app.use("/api/qz", qzRoutes);
 
 app.use((error, _req, res, next) => {
   console.error('Unhandled route error:', error?.message || error);

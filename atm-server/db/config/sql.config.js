@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 let pool;
 let schemaReady;
 
-const getDatabaseUrl = () => process.env.DATABASE_URL || process.env.MYSQL_URL || process.env.SQL_URL || '';
-
+const getDatabaseUrl = () => process.env.DATABASE_URL;
+ console.log('Database configuration loaded');
 const sanitizeMysqlUri = (rawUrl) => {
   const parsed = new URL(rawUrl);
   parsed.searchParams.delete('ssl-mode');
@@ -136,6 +136,38 @@ const ddl = [
     createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS pack_boxes (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    date VARCHAR(32) NOT NULL,
+    model VARCHAR(255) NOT NULL,
+    box_number INT NOT NULL,
+    units_per_box INT NOT NULL DEFAULT 12,
+    status VARCHAR(32) NOT NULL DEFAULT 'open',
+    master_qr TEXT NULL,
+    packed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    printed_at DATETIME NULL,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_box_date_model (date, model)
+  )`,
+  `CREATE TABLE IF NOT EXISTS pack_box_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    box_id BIGINT UNSIGNED NOT NULL,
+    serial VARCHAR(255) NOT NULL,
+    scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (box_id) REFERENCES pack_boxes(id) ON DELETE CASCADE,
+    INDEX idx_item_serial (serial),
+    INDEX idx_item_box (box_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS pack_config (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    model VARCHAR(255) NOT NULL UNIQUE,
+    units_per_box INT NOT NULL DEFAULT 12,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`,
 ];
 
 export const ensureSchema = async () => {
@@ -147,9 +179,19 @@ export const ensureSchema = async () => {
       }
       try {
         await db.query("ALTER TABLE users MODIFY COLUMN role VARCHAR(64) NOT NULL DEFAULT 'user'");
-      } catch {
-        // Table might not exist yet or already altered
-      }
+      } catch {}
+      try {
+        await db.query("ALTER TABLE pack_boxes ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'open'");
+      } catch {}
+      try {
+        await db.query("ALTER TABLE pack_boxes DROP COLUMN serials");
+      } catch {}
+      try {
+        await db.query("ALTER TABLE pack_boxes ADD COLUMN box_code VARCHAR(64) NULL");
+      } catch {}
+      try {
+        await db.query("ALTER TABLE pack_config ADD COLUMN description TEXT NULL");
+      } catch {}
     })().catch((error) => {
       schemaReady = undefined;
       throw error;

@@ -1,7 +1,7 @@
 // PG GROUP — Production Monitor
 // Fully migrated from Google Apps Script to Aiven MySQL REST API
 // All callServer() and getSheet() calls replaced with apiFetch()
-
+import PackingTab from './PackingTab';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Chart, registerables } from "chart.js";
 import ExcelJS from "exceljs";
@@ -684,6 +684,7 @@ function ProductionMonitor({ onLogout }) {
   const [newCust,   setNewCust]   = useState("");
   const [mpInput,   setMpInput]   = useState("");
   const [idleThrInput, setIdleThrInput] = useState(2);
+  const [printerNameInput, setPrinterNameInput] = useState("");
   const [targets,      setTargets]      = useState(DEF_TARGETS.slice());
   const [uEmail,    setUEmail]    = useState("");
   const [uName,     setUName]     = useState("");
@@ -756,8 +757,9 @@ function ProductionMonitor({ onLogout }) {
         if (s.targets) { try { const t = JSON.parse(s.targets); if (Array.isArray(t) && t.length === 12) ns.targets = t; } catch (e) {} }
         if (s.idleThr) { const thr = parseInt(s.idleThr); if (thr > 0) ns.idleThr = thr; }
         if (s.lotMode) ns.lotMode = s.lotMode === "true";
+        if (s.printerName) ns.printerName = s.printerName;
       }
-      setAppSettings(ns); setIdleThrInput(ns.idleThr); setLotMode(ns.lotMode); setTargets(ns.targets.slice());
+      setAppSettings(ns); setIdleThrInput(ns.idleThr); setLotMode(ns.lotMode); setTargets(ns.targets.slice()); setPrinterNameInput(ns.printerName || "");
       if (callback) callback(ns);
     }).catch(() => { if (callback) callback(appSettings); });
   }, []);
@@ -1277,10 +1279,11 @@ function ProductionMonitor({ onLogout }) {
 
   const saveSettings = useCallback(() => {
     const thr = parseInt(idleThrInput) || 2;
-    setAppSettings(prev => ({ ...prev, idleThr:thr }));
+    setAppSettings(prev => ({ ...prev, idleThr:thr, printerName:printerNameInput }));
     saveSetting("idleThr", thr);
+    saveSetting("printerName", printerNameInput);
     alert("✅ Settings saved!");
-  }, [idleThrInput, saveSetting]);
+  }, [idleThrInput, printerNameInput, saveSetting]);
 
   const loadUsersList = useCallback(() => {
     getSheet("AuthUsers").then(data => {
@@ -1399,9 +1402,9 @@ function ProductionMonitor({ onLogout }) {
     loadSettings((settings) => {
       setS(prev => ({ ...prev, hourly:initHourly(settings.targets) }));
       setSyncUI("syncing", "Loading data...");
-      loadModels(); loadRange(); loadMP();
       setTimeout(loadAll, 500);
     });
+    loadModels(); loadRange(); loadMP();
     const idleIv = setInterval(() => { if (!idleOpenRef.current && lastScanRef.current) checkIdle(); }, 10000);
     const dayIv  = setInterval(() => { if (S.date !== todayStr()) resetDay(); }, 60000);
     return () => { clearInterval(idleIv); clearInterval(dayIv); };
@@ -1514,6 +1517,7 @@ function ProductionMonitor({ onLogout }) {
           const tabs = [
             { id:"dashboard", label:"📊 Dashboard", show:true },
             { id:"scanning",  label:"🔍 Scanning",  show:!isPlantHead },
+            { id:"packing", label:"📦 Packing", show:!isPlantHead },
             { id:"reports",   label:"📋 Reports",   show:true },
             { id:"charts",    label:"📈 Charts",    show:true },
             { id:"settings",  label:"⚙️ Settings",  show:!isPlantHead },
@@ -1605,10 +1609,20 @@ function ProductionMonitor({ onLogout }) {
             addModel={addModel} delModel={delModel}
           />
         )}
+        {activeTab==="packing" && (
+          <PackingTab
+            models={S.models}
+            apiFetch={apiFetch}
+            todayStr={todayStr}
+            sRange={sRange}
+            appSettings={appSettings}
+          />
+        )}
         {activeTab==="admin" && adminUnlocked && (
           <AdminTab
             targets={targets} setTargets={setTargets}
             idleThrInput={idleThrInput} setIdleThrInput={setIdleThrInput}
+            printerNameInput={printerNameInput} setPrinterNameInput={setPrinterNameInput}
             saveTargets={saveTargets} defaultTargets={()=>setTargets(DEF_TARGETS.slice())}
             saveSettings={saveSettings}
             uEmail={uEmail} setUEmail={setUEmail}
@@ -3212,6 +3226,10 @@ function ChartsTab({ S, manpower }) {
 
     const upsert = (key, ref, config, update) => {
       if (!ref.current) return;
+      if (charts.current[key] && charts.current[key].canvas !== ref.current) {
+        charts.current[key].destroy();
+        charts.current[key] = null;
+      }
       if (!charts.current[key]) charts.current[key] = new C(ref.current.getContext("2d"), config);
       update(charts.current[key]);
       charts.current[key].update("none");
@@ -3319,6 +3337,7 @@ function SettingsTab({ S, sRange, rngDisp, rngModel, setRngModel, rngStart, setR
 function AdminTab({
   targets, setTargets,
   idleThrInput, setIdleThrInput,
+  printerNameInput, setPrinterNameInput,
   saveTargets, defaultTargets, saveSettings,
   uEmail, setUEmail, uName, setUName, uRole, setURole,
   editingUser, handleSaveUser, handleCancelEdit,
@@ -3349,6 +3368,10 @@ function AdminTab({
         <div className="fg" style={{maxWidth:220}}>
           <label className="fl">Idle Alert Threshold (minutes)</label>
           <input type="number" className="fi" value={idleThrInput} min="1" onChange={e=>setIdleThrInput(parseInt(e.target.value)||2)}/>
+        </div>
+        <div className="fg" style={{maxWidth:220}}>
+          <label className="fl">Zebra Printer Name</label>
+          <input type="text" className="fi" value={printerNameInput} placeholder="ZDesigner ZT231-300dpi ZPL" onChange={e=>setPrinterNameInput(e.target.value)}/>
         </div>
         <button className="btn btn-navy" onClick={saveSettings}>Save Settings</button>
       </div>

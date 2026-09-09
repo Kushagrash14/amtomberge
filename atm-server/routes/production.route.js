@@ -9,6 +9,8 @@ import {
   getManpower, setManpower,
   getUsers, addUser, updateUser, deleteUser,
   verifyAdmin,
+  getPackBoxes, savePackBox, getPackConfig, savePackConfig, deletePackConfig,
+  savePackScan, deletePackScan
 } from '../controllers/production.controller.js';
 
 const router = express.Router();
@@ -52,5 +54,13 @@ router.delete('/users/:email', deleteUser);
 
 // Admin auth
 router.post('/admin/verify', verifyAdmin);
+
+router.get('/pack/boxes',   getPackBoxes);
+router.post('/pack/boxes',  savePackBox);
+router.post('/pack/scan',    savePackScan);
+router.delete('/pack/scan/:itemId', deletePackScan);
+router.get('/pack/config',  getPackConfig);
+router.post('/pack/config', savePackConfig);
+router.delete('/pack/config/:model', deletePackConfig);
 
 export default router;

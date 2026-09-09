@@ -1,8 +1,9 @@
 import {
   Setting, ProductionEntry, IdleRecord, ReloadRecord,
-  ProductionModel, SerialRange, Manpower
+  ProductionModel, SerialRange, Manpower, PackBox, PackBoxItem, PackConfig
 } from '../db/modules/production-models/data.models.js';
 import userModel from '../db/modules/auth-models/user.model.js';
+import { generateMasterLabelZPL } from "../templates/masterLabel.zpl.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const ok  = (res, data)        => res.json({ success: true,  ...data });
@@ -467,5 +468,222 @@ export const verifyAdmin = async (req, res) => {
     err(res, 'Incorrect password', 401);
   } catch {
     err(res, 'Verification failed', 500);
+  }
+};
+//
+
+//
+
+// GET /api/production/pack/boxes?date=&model=
+export const getPackBoxes = async (req, res) => {
+  try {
+    const { date, startDate, endDate, model } = req.query;
+    const filter = {};
+    if (date) {
+      filter.date = date;
+    } else if (startDate || endDate) {
+      filter.date = {};
+      if (startDate) filter.date.$gte = startDate;
+      if (endDate) filter.date.$lte = endDate;
+    }
+    if (model) filter.model = model;
+    const boxes = await PackBox.find(filter).sort({ box_number: 1 });
+
+    const boxesWithItems = await Promise.all(boxes.map(async (b) => {
+      const items = await PackBoxItem.find({ box_id: b.id }).sort({ scanned_at: 1 });
+      return {
+        ...b,
+        serials: items, // Return full item objects
+      };
+    }));
+
+    ok(res, { boxes: boxesWithItems });
+  } catch (e) {
+    err(res, 'Failed to load boxes', 500);
+  }
+};
+
+// POST /api/production/pack/scan
+export const savePackScan = async (req, res) => {
+  try {
+    const { date, model, serial } = req.body;
+    if (!date || !model || !serial) return err(res, 'date, model, serial required');
+
+    // 1. Find current open box
+    let box = await PackBox.findOne({ date, model, status: 'open' }).sort({ box_number: -1 });
+
+    if (!box) {
+      // Create new open box
+      const lastBox = await PackBox.findOne({ date, model }).sort({ box_number: -1 });
+      const boxNum = lastBox ? lastBox.box_number + 1 : 1;
+      const config = await PackConfig.findOne({ model });
+      const upb = config ? config.units_per_box : 12;
+
+      // Generate Box Code: PG + DD + MM + YY + MODEL + SEQ(5)
+      const now = new Date();
+      const dd = now.getDate().toString().padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yy = now.getFullYear().toString().slice(-2);
+      const seq = boxNum.toString().padStart(5, '0');
+      const boxCode = `PG${dd}${mm}${yy}${model}${seq}`;
+
+      box = await PackBox.create({
+        date, model, box_number: boxNum, box_code: boxCode, units_per_box: upb, status: 'open'
+      });
+    }
+
+    // 2. Validations
+    // Duplicate check in packing items
+    const itemExists = await PackBoxItem.findOne({ serial });
+    if (itemExists) return res.json({ success: false, message: 'Serial already packed' });
+
+    // Duplicate check in production entries
+    const prodExists = await ProductionEntry.findOne({ serial });
+    if (prodExists) return res.json({ success: false, message: 'Serial already in production' });
+
+    // Model mismatch
+    const extractModel = (s) => s.length >= 10 ? s.substring(4, 10) : "";
+    const scannedModel = extractModel(serial);
+    if (scannedModel && scannedModel !== model) {
+      return res.json({ success: false, message: `Model mismatch: expected ${model}, found ${scannedModel}` });
+    }
+
+    // Range validation
+    const extractNum = (s) => {
+      const m = String(s).match(/(\\d{1,10})$/);
+      return m ? parseInt(m[1], 10) : null;
+    };
+    const thisNum = extractNum(serial);
+    const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
+    if (range && thisNum !== null) {
+      if (thisNum < range.start || thisNum > range.end) {
+        return res.json({ success: false, message: `Out of range: ${range.start}-${range.end}` });
+      }
+    }
+
+    // 3. Save scan
+    await PackBoxItem.create({ box_id: box.id, serial });
+
+    const currentItems = await PackBoxItem.find({ box_id: box.id });
+
+    // 4. Check if box is now full and close it immediately
+    let printData = null;
+
+    if (currentItems.length >= box.units_per_box) {
+      box.status = 'closed';
+      box.master_qr = currentItems.map(i => i.serial).join(',');
+      await box.save();
+
+      const zpl = generateMasterLabelZPL({
+        boxCode: box.box_code,
+        boxNumber: box.box_number,
+        model: box.model,
+        quantity: currentItems.length,
+      });
+
+      printData = {
+        shouldPrint: true,
+        zpl,
+        boxCode: box.box_code,
+        boxNumber: box.box_number,
+      };
+
+    }
+
+    ok(res, {
+      box_number: box.box_number,
+      box_code: box.box_code,
+      item_count: currentItems.length,
+      units_per_box: box.units_per_box,
+      status: box.status,
+      serials: currentItems,
+      print: printData
+    });
+  } catch (e) {
+    console.error('savePackScan error:', e);
+    err(res, 'Failed to save scan', 500);
+  }
+};
+
+// DELETE /api/production/pack/scan/:itemId
+export const deletePackScan = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    if (!itemId) return err(res, 'itemId required');
+    const result = await PackBoxItem.deleteOne({ id: itemId });
+    if (result.deletedCount === 0) return err(res, 'Item not found', 404);
+    ok(res, { message: 'Item removed' });
+  } catch (e) {
+    err(res, 'Failed to remove scan', 500);
+  }
+};
+
+// POST /api/production/pack/boxes  — save a completed box
+export const savePackBox = async (req, res) => {
+  try {
+    const { date, model, box_number, units_per_box, serials, master_qr } = req.body;
+    if (!date || !model || !serials?.length) return err(res, 'Missing required fields');
+    
+    // Check none of these serials already packed
+    const existing = await PackBox.find({ date, model });
+    const allPacked = existing.flatMap(b => typeof b.serials === 'string' ? JSON.parse(b.serials) : b.serials);
+    const dupes = serials.filter(s => allPacked.includes(s));
+    if (dupes.length) return err(res, `Serials already packed: ${dupes.join(', ')}`);
+
+    const box = await PackBox.create({
+      date, model, box_number, units_per_box,
+      master_qr: master_qr || serials.join(','),
+      packed_at: new Date().toISOString(),
+    });
+
+    // Save each serial as a separate PackBoxItem to fix the "vacant" box issue
+    await PackBoxItem.create(serials.map(s => ({
+      box_id: box.id,
+      serial: s,
+      scanned_at: new Date().toISOString()
+    })));
+
+    ok(res, { box });
+  } catch (e) {
+    err(res, 'Failed to save box', 500);
+  }
+};
+
+// GET /api/production/pack/config
+export const getPackConfig = async (req, res) => {
+  try {
+    const configs = await PackConfig.find({});
+    ok(res, { configs });
+  } catch {
+    err(res, 'Failed to load pack config', 500);
+  }
+};
+
+// POST /api/production/pack/config  body: { model, units_per_box, description }
+export const savePackConfig = async (req, res) => {
+  try {
+    const { model, units_per_box, description } = req.body;
+    if (!model || !units_per_box) return err(res, 'Missing fields');
+    const config = await PackConfig.findOneAndUpdate(
+      { model },
+      { $set: { units_per_box: Number(units_per_box), description: description || '' } },
+      { upsert: true, new: true }
+    );
+    ok(res, { config });
+  } catch {
+    err(res, 'Failed to save config', 500);
+  }
+};
+
+// DELETE /api/production/pack/config/:model
+export const deletePackConfig = async (req, res) => {
+  try {
+    const { model } = req.params;
+    if (!model) return err(res, 'Model is required');
+    const result = await PackConfig.deleteOne({ model });
+    if (result.deletedCount === 0) return err(res, 'Config not found', 404);
+    ok(res, { message: `Config for model ${model} deleted` });
+  } catch {
+    err(res, 'Failed to delete config', 500);
   }
 };

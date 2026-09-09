@@ -49,3 +49,21 @@ export class Manpower extends SqlModel {
   static writableFields = ['date', 'manpower'];
   static defaults = { manpower: 0 };
 }
+export class PackBox extends SqlModel {
+  static table = 'pack_boxes';
+  static fields = ['id', 'date', 'model', 'box_number', 'box_code', 'units_per_box', 'status', 'master_qr', 'packed_at', 'printed_at', ...timestamps];
+  static writableFields = ['date', 'model', 'box_number', 'box_code', 'units_per_box', 'status', 'master_qr', 'packed_at', 'printed_at'];
+}
+
+export class PackBoxItem extends SqlModel {
+  static table = 'pack_box_items';
+  static fields = ['id', 'box_id', 'serial', 'scanned_at', ...timestamps];
+  static writableFields = ['box_id', 'serial', 'scanned_at'];
+}
+
+export class PackConfig extends SqlModel {
+  static table = 'pack_config';
+  static fields = ['id', 'model', 'units_per_box', 'description', ...timestamps];
+  static writableFields = ['model', 'units_per_box', 'description'];
+  static defaults = { units_per_box: 12 };
+}
