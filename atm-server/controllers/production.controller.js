@@ -4,12 +4,52 @@ import {
 } from '../db/modules/production-models/data.models.js';
 import userModel from '../db/modules/auth-models/user.model.js';
 import { generateMasterLabelZPL } from "../templates/masterLabel.zpl.js";
+import { getPool } from '../db/config/sql.config.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const ok  = (res, data)        => res.json({ success: true,  ...data });
 const err = (res, msg, status = 400) => res.status(status).json({ success: false, message: msg });
 
+// DIAGNOSTIC FUNCTION: Run raw SQL to verify connectivity and data
+const runDbDiagnostics = async () => {
+  console.log('\n--- [DB DIAGNOSTICS START] ---');
+  try {
+    const pool = getPool();
+    const results = {};
+
+    const queries = {
+      db_name: 'SELECT DATABASE() AS name',
+      host: 'SELECT @@hostname AS host',
+      user: 'SELECT CURRENT_USER() AS user',
+      total_boxes: 'SELECT COUNT(*) AS count FROM pack_boxes',
+      date_check: "SELECT COUNT(*) AS count FROM pack_boxes WHERE date = '2026-09-09'",
+      range_check: "SELECT COUNT(*) AS count FROM pack_boxes WHERE date >= '2026-09-06' AND date <= '2026-09-09'",
+      table_def: 'SHOW CREATE TABLE pack_boxes'
+    };
+
+    for (const [key, sql] of Object.entries(queries)) {
+      const [rows] = await pool.query(sql);
+      results[key] = rows[0];
+    }
+
+    console.log('Database:', results.db_name?.name);
+    console.log('Host:', results.host?.host);
+    console.log('User:', results.user?.user);
+    console.log('Total pack_boxes:', results.total_boxes?.count);
+    console.log('Count for 2026-09-09:', results.date_check?.count);
+    console.log('Count for 09-06 to 09-09:', results.range_check?.count);
+    console.log('Table Definition:', results.table_def);
+  } catch (e) {
+    console.error('Diagnostics failed:', e);
+  }
+  console.log('--- [DB DIAGNOSTICS END] ---\n');
+};
+
+// Run diagnostics immediately on module load
+runDbDiagnostics();
+
 const extractSerialNum = (serial) => {
+
   const match = String(serial || '').match(/(\d{1,10})$/);
   return match ? parseInt(match[1], 10) : null;
 };
@@ -478,6 +518,7 @@ export const verifyAdmin = async (req, res) => {
 export const getPackBoxes = async (req, res) => {
   try {
     const { date, startDate, endDate, model } = req.query;
+
     const filter = {};
     if (date) {
       filter.date = date;
@@ -487,6 +528,7 @@ export const getPackBoxes = async (req, res) => {
       if (endDate) filter.date.$lte = endDate;
     }
     if (model) filter.model = model;
+
     const boxes = await PackBox.find(filter).sort({ box_number: 1 });
 
     const boxesWithItems = await Promise.all(boxes.map(async (b) => {
@@ -497,111 +539,176 @@ export const getPackBoxes = async (req, res) => {
       };
     }));
 
-    ok(res, { boxes: boxesWithItems });
+    // In Box History, only show boxes that have scanned items (filter out any empty ghost boxes)
+    const validBoxes = boxesWithItems.filter(b => b.serials && b.serials.length > 0);
+
+    ok(res, { boxes: validBoxes });
   } catch (e) {
     err(res, 'Failed to load boxes', 500);
   }
 };
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
 
+/** Extract model code embedded in serial: chars 4–9 (0-indexed) */
+const extractModelFromSerial = (serial) =>
+  serial.length >= 10 ? serial.substring(4, 10) : '';
+
+/** Build a box code: PG + DDMMYY + MODEL + SEQ(5) */
+const buildBoxCode = (model, boxNum) => {
+  const now = new Date();
+  const dd  = now.getDate().toString().padStart(2, '0');
+  const mm  = String(now.getMonth() + 1).padStart(2, '0');
+  const yy  = now.getFullYear().toString().slice(-2);
+  const seq = boxNum.toString().padStart(5, '0');
+  return `PG${dd}${mm}${yy}${model}${seq}`;
+};
+
+// ─────────────────────────────────────────────────────────────
 // POST /api/production/pack/scan
+// ─────────────────────────────────────────────────────────────
 export const savePackScan = async (req, res) => {
   try {
     const { date, model, serial } = req.body;
-    if (!date || !model || !serial) return err(res, 'date, model, serial required');
 
-    // 1. Find current open box
-    let box = await PackBox.findOne({ date, model, status: 'open' }).sort({ box_number: -1 });
+    if (!date || !model || !serial) {
+      return err(res, 'date, model, serial required');
+    }
 
-    if (!box) {
-      // Create new open box
-      const lastBox = await PackBox.findOne({ date, model }).sort({ box_number: -1 });
-      const boxNum = lastBox ? lastBox.box_number + 1 : 1;
-      const config = await PackConfig.findOne({ model });
-      const upb = config ? config.units_per_box : 12;
 
-      // Generate Box Code: PG + DD + MM + YY + MODEL + SEQ(5)
-      const now = new Date();
-      const dd = now.getDate().toString().padStart(2, '0');
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const yy = now.getFullYear().toString().slice(-2);
-      const seq = boxNum.toString().padStart(5, '0');
-      const boxCode = `PG${dd}${mm}${yy}${model}${seq}`;
+    // ── 1. Load pack config (needed for upb + label fields) ──
+    const config = await PackConfig.findOne({ model });
+    const unitsPerBox  = req.body.units_per_box ? Number(req.body.units_per_box) : (config?.units_per_box ?? 12);
+    const description  = config?.description    ?? model;
+    const size_inch    = config?.size_inch       ?? '';
 
-      box = await PackBox.create({
-        date, model, box_number: boxNum, box_code: boxCode, units_per_box: upb, status: 'open'
+
+    // ── 2. Validations FIRST (BEFORE creating any new box) ────
+
+    // Already packed in any box
+    const alreadyPacked = await PackBoxItem.findOne({ serial });
+    if (alreadyPacked) {
+      return res.json({ success: false, message: 'Serial already packed' });
+    }
+
+    // Already in a production entry
+    const alreadyInProduction = await ProductionEntry.findOne({ serial });
+    if (alreadyInProduction) {
+      return res.json({ success: false, message: 'Serial already in production' });
+    }
+
+    // Model mismatch (only when model is extractable from serial)
+    const scannedModel = extractModelFromSerial(serial);
+    if (scannedModel && scannedModel !== model) {
+      return res.json({
+        success: false,
+        message: `Model mismatch: expected ${model}, found ${scannedModel}`,
       });
     }
 
-    // 2. Validations
-    // Duplicate check in packing items
-    const itemExists = await PackBoxItem.findOne({ serial });
-    if (itemExists) return res.json({ success: false, message: 'Serial already packed' });
-
-    // Duplicate check in production entries
-    const prodExists = await ProductionEntry.findOne({ serial });
-    if (prodExists) return res.json({ success: false, message: 'Serial already in production' });
-
-    // Model mismatch
-    const extractModel = (s) => s.length >= 10 ? s.substring(4, 10) : "";
-    const scannedModel = extractModel(serial);
-    if (scannedModel && scannedModel !== model) {
-      return res.json({ success: false, message: `Model mismatch: expected ${model}, found ${scannedModel}` });
-    }
-
-    // Range validation
-    const extractNum = (s) => {
-      const m = String(s).match(/(\\d{1,10})$/);
-      return m ? parseInt(m[1], 10) : null;
-    };
-    const thisNum = extractNum(serial);
+    // Serial range check
     const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
-    if (range && thisNum !== null) {
-      if (thisNum < range.start || thisNum > range.end) {
-        return res.json({ success: false, message: `Out of range: ${range.start}-${range.end}` });
+    if (range) {
+      const num = extractSerialNum(serial);
+      if (num !== null && (num < range.start || num > range.end)) {
+        return res.json({
+          success: false,
+          message: `Serial out of range: allowed ${range.start}–${range.end}`,
+        });
       }
     }
 
-    // 3. Save scan
+
+    // ── 3. Find or create the current open box ───────────────
+    let box = await PackBox.findOne({ date, model, status: 'open' })
+      .sort({ box_number: -1 });
+
+    if (box) {
+      // Check if this open box is already full
+      const existingItems = await PackBoxItem.find({ box_id: box.id });
+      if (existingItems.length >= box.units_per_box) {
+        box.status = 'closed';
+        box.packed_at = box.packed_at || new Date();
+        await box.save();
+        box = null; // force creation of the next box
+      }
+    }
+
+    if (!box) {
+      const pool = getPool();
+      const [maxRows] = await pool.query(
+        'SELECT COALESCE(MAX(box_number), 0) AS max_box FROM pack_boxes WHERE date = ? AND model = ?',
+        [date, model]
+      );
+      const maxBoxNum = Number(maxRows[0]?.max_box || 0);
+      const boxNum    = maxBoxNum + 1;
+      const boxCode   = buildBoxCode(model, boxNum);
+
+      box = await PackBox.create({
+        date,
+        model,
+        box_number:    boxNum,
+        box_code:      boxCode,
+        units_per_box: unitsPerBox,
+        status:        'open',
+      });
+    } else if (req.body.units_per_box && box.units_per_box !== unitsPerBox) {
+      box.units_per_box = unitsPerBox;
+      await box.save();
+    }
+
+
+    // ── 4. Save the scan ─────────────────────────────────────
     await PackBoxItem.create({ box_id: box.id, serial });
 
-    const currentItems = await PackBoxItem.find({ box_id: box.id });
+    const currentItems = await PackBoxItem.find({ box_id: box.id }).sort({ scanned_at: 1 });
 
-    // 4. Check if box is now full and close it immediately
+
+    // ── 5. Close box + generate label when full ──────────────
     let printData = null;
 
     if (currentItems.length >= box.units_per_box) {
-      box.status = 'closed';
-      box.master_qr = currentItems.map(i => i.serial).join(',');
+      const serials = currentItems.map((i) => i.serial);
+
+      box.status     = 'closed';
+      box.master_qr  = serials.join(',');
       await box.save();
 
       const zpl = generateMasterLabelZPL({
-        boxCode: box.box_code,
+        model,
+        description,
+        size_inch,
         boxNumber: box.box_number,
-        model: box.model,
-        quantity: currentItems.length,
+        boxCode:   box.box_code,
+        serials,
       });
 
       printData = {
         shouldPrint: true,
         zpl,
-        boxCode: box.box_code,
+        boxCode:   box.box_code,
         boxNumber: box.box_number,
+        box_id:    box.id,           // needed so frontend can call mark-printed
       };
-
     }
 
-    ok(res, {
-      box_number: box.box_number,
-      box_code: box.box_code,
-      item_count: currentItems.length,
+
+    // ── 6. Respond ───────────────────────────────────────────
+    return ok(res, {
+      box_id:        box.id,           // included so frontend can mark-printed after QZ success
+      box_number:    box.box_number,
+      box_code:      box.box_code,
+      item_count:    currentItems.length,
       units_per_box: box.units_per_box,
-      status: box.status,
-      serials: currentItems,
-      print: printData
+      status:        box.status,
+      serials:       currentItems,
+      print:         printData,
     });
+
   } catch (e) {
     console.error('savePackScan error:', e);
-    err(res, 'Failed to save scan', 500);
+    return err(res, 'Failed to save scan', 500);
   }
 };
 
@@ -646,6 +753,232 @@ export const savePackBox = async (req, res) => {
     ok(res, { box });
   } catch (e) {
     err(res, 'Failed to save box', 500);
+  }
+};
+
+// GET /api/production/pack/open-box?model=X&date=YYYY-MM-DD
+// Returns the currently open box for a given model (if any), with its scanned items.
+// Also returns the most recent closed-but-unprinted box so the frontend can show a
+// "reprint required" warning and regenerate the label without re-completing the box.
+export const getOpenBox = async (req, res) => {
+  try {
+    const { model, date } = req.query;
+    if (!model) return err(res, 'model is required');
+
+    const today = date || new Date().toISOString().slice(0, 10);
+
+    const config = await PackConfig.findOne({ model });
+    const description = config?.description ?? model;
+    const size_inch   = config?.size_inch   ?? '';
+
+    // ── 1. Check for a closed-but-unprinted box (status === 'closed') ──
+    // Once printed, status transitions to 'printed', so already-printed boxes will never be returned here.
+    const unprintedBox = await PackBox.findOne({ date: today, model, status: 'closed' })
+      .sort({ box_number: -1 });
+
+    let closedUnprintedBoxData = null;
+    if (unprintedBox) {
+      const items = await PackBoxItem.find({ box_id: unprintedBox.id })
+        .sort({ scanned_at: 1 });
+
+      const zpl = generateMasterLabelZPL({
+        model,
+        description,
+        size_inch,
+        boxNumber: unprintedBox.box_number,
+        boxCode:   unprintedBox.box_code,
+        serials:   items.map(i => i.serial),
+      });
+
+      closedUnprintedBoxData = {
+        id:            unprintedBox.id,
+        box_number:    unprintedBox.box_number,
+        box_code:      unprintedBox.box_code,
+        units_per_box: unprintedBox.units_per_box,
+        serials:       items,
+        zpl,
+      };
+    }
+
+    // ── 2. Find the most recently open box for this model today ──
+    const openBox = await PackBox.findOne({ date: today, model, status: 'open' })
+      .sort({ box_number: -1 });
+
+    if (openBox) {
+      // Sync units_per_box with current config if it changed
+      if (config?.units_per_box && openBox.units_per_box !== config.units_per_box) {
+        openBox.units_per_box = config.units_per_box;
+        await openBox.save();
+      }
+
+      // Load items already scanned into the open box
+      const items = await PackBoxItem.find({ box_id: openBox.id })
+        .sort({ scanned_at: 1 });
+
+      // ── If box is already full (items reached upb), auto-close it server-side ──
+      // This handles race conditions (UPB changed, prior crash, etc.). The box is
+      // promoted to closedUnprintedBox so the amber banner shows and the user prints
+      // before starting the next box.
+      if (items.length > 0 && items.length >= openBox.units_per_box) {
+        const serials = items.map(i => i.serial);
+        openBox.status    = 'closed';
+        openBox.master_qr = serials.join(',');
+        openBox.packed_at = openBox.packed_at || new Date().toISOString();
+        await openBox.save();
+
+        const zpl = generateMasterLabelZPL({
+          model, description, size_inch,
+          boxNumber: openBox.box_number,
+          boxCode:   openBox.box_code,
+          serials,
+        });
+
+        // Merge with any pre-existing closedUnprintedBoxData — keep whichever is newer
+        const boxData = {
+          id:            openBox.id,
+          box_number:    openBox.box_number,
+          box_code:      openBox.box_code,
+          units_per_box: openBox.units_per_box,
+          serials:       items,
+          zpl,
+        };
+
+        const lastBox2 = await PackBox.findOne({ date: today, model })
+          .sort({ box_number: -1 });
+
+        return ok(res, {
+          openBox: null,
+          closedUnprintedBox: boxData,
+          nextBoxNumber: lastBox2 ? lastBox2.box_number + 1 : openBox.box_number + 1,
+        });
+      }
+
+      // ── Partial open box — return as-is for the user to continue scanning ──
+      return ok(res, {
+        openBox: {
+          id:            openBox.id,
+          box_number:    openBox.box_number,
+          box_code:      openBox.box_code,
+          units_per_box: openBox.units_per_box,
+          status:        openBox.status,
+          date:          openBox.date,
+          model:         openBox.model,
+          serials:       items,
+          zpl:           null,  // not full yet — no ZPL needed
+        },
+        closedUnprintedBox: closedUnprintedBoxData,
+        nextBoxNumber: openBox.box_number,
+      });
+    }
+
+    // ── 3. No open box — find the most recent box (for next-box-number) ──
+    const lastBox = await PackBox.findOne({ date: today, model })
+      .sort({ box_number: -1 });
+
+    return ok(res, {
+      openBox: null,
+      closedUnprintedBox: closedUnprintedBoxData,
+      nextBoxNumber: lastBox ? lastBox.box_number + 1 : 1,
+    });
+
+  } catch (e) {
+    console.error('getOpenBox error:', e);
+    err(res, 'Failed to load open box', 500);
+  }
+};
+
+// POST /api/production/pack/manual-print
+// Closes (if needed) and generates label ZPL for a full/pending box.
+export const manualPrintBox = async (req, res) => {
+  try {
+    const { date, model, box_id, box_number, units_per_box } = req.body;
+    if (!model) return err(res, 'model is required');
+
+    const today = date || new Date().toISOString().slice(0, 10);
+
+    let box = null;
+    if (box_id) {
+      box = await PackBox.findOne({ id: Number(box_id) });
+    }
+
+    if (!box && box_number) {
+      box = await PackBox.findOne({ date: today, model, box_number: Number(box_number) });
+    }
+
+    // Fallback: search for open box today, or latest box today
+    if (!box) {
+      box = await PackBox.findOne({ date: today, model, status: 'open' }).sort({ box_number: -1 });
+    }
+    if (!box) {
+      box = await PackBox.findOne({ date: today, model }).sort({ box_number: -1 });
+    }
+
+    if (!box) {
+      return err(res, `No box found for model ${model} on ${today}`, 404);
+    }
+
+    const items = await PackBoxItem.find({ box_id: box.id }).sort({ scanned_at: 1 });
+    if (!items || items.length === 0) {
+      return err(res, `Box #${box.box_number} has no scanned items to print`, 400);
+    }
+
+    const serials = items.map(i => i.serial);
+
+    if (units_per_box) {
+      box.units_per_box = Number(units_per_box);
+    }
+    box.status    = 'closed';
+    box.master_qr = serials.join(',');
+    box.packed_at = box.packed_at || new Date().toISOString();
+    await box.save();
+
+    const config = await PackConfig.findOne({ model: box.model });
+    const description = config?.description ?? box.model;
+    const size_inch   = config?.size_inch   ?? '';
+
+    const zpl = generateMasterLabelZPL({
+      model: box.model,
+      description,
+      size_inch,
+      boxNumber: box.box_number,
+      boxCode:   box.box_code,
+      serials,
+    });
+
+    return ok(res, {
+      box_id:        box.id,
+      box_number:    box.box_number,
+      box_code:      box.box_code,
+      units_per_box: box.units_per_box,
+      item_count:    items.length,
+      serials:       items,
+      zpl,
+    });
+  } catch (e) {
+    console.error('manualPrintBox error:', e);
+    err(res, 'Failed to prepare box for manual printing: ' + e.message, 500);
+  }
+};
+
+// POST /api/production/pack/boxes/:id/printed
+// Called by the frontend after QZ Tray successfully sends the label to the physical printer.
+// Sets printed_at so we can detect unprinted boxes on next session restore.
+export const markBoxPrinted = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return err(res, 'Box ID is required');
+
+    const box = await PackBox.findOne({ id });
+    if (!box) return err(res, 'Box not found', 404);
+
+    box.status = 'printed';
+    box.printed_at = new Date();
+    await box.save();
+
+    ok(res, { message: `Box #${box.box_number} marked as printed`, box_id: id, status: box.status });
+  } catch (e) {
+    console.error('markBoxPrinted error:', e);
+    err(res, 'Failed to mark box as printed', 500);
   }
 };
 

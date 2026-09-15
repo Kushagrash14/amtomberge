@@ -134,8 +134,45 @@ export class SqlModel {
     for (const [field, value] of Object.entries(filter || {})) {
       const column = this.column(field);
       if (value === undefined) continue;
+
       if (value === null) {
         clauses.push(`${column} IS NULL`);
+      } else if (typeof value === 'object' && !Array.isArray(value)) {
+        // Support Mongoose-style operators
+        const operators = {
+          $gte: '>=',
+          $lte: '<=',
+          $gt: '>',
+          $lt: '<',
+          $ne: '!=',
+        };
+
+        const opEntries = Object.entries(value);
+        if (opEntries.length === 0) {
+          // Fallback for empty object
+          clauses.push(`${column} = ?`);
+          params.push(value);
+        } else {
+          const opClauses = [];
+          for (const [op, opValue] of opEntries) {
+            const sqlOp = operators[op];
+            if (sqlOp) {
+              opClauses.push(`${column} ${sqlOp} ?`);
+              params.push(opValue);
+            } else {
+              // Unknown operator, treat as equality if it's just a value,
+              // but since it's an object, we likely can't match it.
+              // For safety, we skip unknown operators to avoid SQL errors.
+            }
+          }
+          if (opClauses.length > 0) {
+            clauses.push(`(${opClauses.join(' AND ')})`);
+          }
+        }
+      } else if (Array.isArray(value)) {
+        // Support $in by default for arrays
+        clauses.push(`${column} IN (${value.map(() => '?').join(', ')})`);
+        params.push(...value);
       } else {
         clauses.push(`${column} = ?`);
         params.push(value);

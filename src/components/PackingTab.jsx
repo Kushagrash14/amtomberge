@@ -221,6 +221,78 @@ const PACK_CSS = `
   .pk-ready-icon { font-size: 28px; flex-shrink: 0; }
   .pk-ready-text { flex: 1; }
   .pk-ready-title { font-size: 14px; font-weight: 800; color: #065f46; }
+  .pk-history-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .pk-history-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--g100);
+    color: var(--navy);
+    font-weight: 700;
+    box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
+  }
+
+  /* ─── Open-box loading state ───────────────────────── */
+  .pk-syncing-banner {
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border: 2px solid #93c5fd;
+    border-radius: 9px;
+    padding: 11px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1e40af;
+    animation: pk-slide-in .2s ease;
+  }
+  .pk-spin {
+    width: 18px; height: 18px;
+    border: 3px solid #93c5fd;
+    border-top-color: #1d4ed8;
+    border-radius: 50%;
+    animation: pk-rotate .7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pk-rotate { to { transform: rotate(360deg); } }
+
+  .pk-model-card.loading {
+    opacity: .6;
+    pointer-events: none;
+    position: relative;
+    overflow: hidden;
+  }
+  .pk-model-card.loading::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent);
+    animation: pk-shimmer 1s infinite;
+  }
+  @keyframes pk-shimmer {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(100%); }
+  }
+
+  /* ─── Unprinted box warning banner ─────────────────── */
+  .pk-unprinted-banner {
+    background: linear-gradient(135deg, #fffbeb, #fef3c7);
+    border: 2px solid #f59e0b;
+    border-radius: 9px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    animation: pk-slide-in .25s ease;
+  }
+  .pk-unprinted-icon { font-size: 22px; flex-shrink: 0; line-height: 1; }
+  .pk-unprinted-body { flex: 1; }
+  .pk-unprinted-title { font-size: 13px; font-weight: 800; color: #92400e; margin-bottom: 2px; }
+  .pk-unprinted-sub { font-size: 11px; color: #b45309; font-weight: 500; margin-bottom: 8px; }
+  .pk-unprinted-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 `;
 // ─── Helper: current time string ──────────────────────────────────────────────
 function nowStr() {
@@ -281,12 +353,23 @@ function packBeep(ok) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PACKING TAB COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── localStorage key for persisted model selection ──────────────────────────
+const STORAGE_KEY_MODEL = "packing_selected_model";
+
 export default function PackingTab({ models = [], apiFetch, todayStr, sRange, appSettings = {} }) {
   // ─── Sub-tab state ──────────────────────────────────────────────────────────
   const [activeSubTab, setActiveSubTab] = useState("scan"); // "scan" | "history" | "config"
 
   // ─── Model & packing state ──────────────────────────────────────────────────
-  const [selectedModel, setSelectedModel] = useState(null);   // { name, customer, upb }
+  // Restore last selected model from localStorage on first mount
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MODEL);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [currentSerials, setCurrentSerials] = useState([]);   // [{id, serial}, ...] in current box
   const [boxNumber, setBoxNumber] = useState(1);
   const [history, setHistory] = useState([]);                 // completed boxes
@@ -308,8 +391,12 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   const [vlog, setVlog] = useState([{ type: "info", msg: "Packing module ready.", time: nowStr() }]);
   const [lastCompletedBox, setLastCompletedBox] = useState(null); // State to hold serials for the print modal after clearing the grid
   const [lastZpl, setLastZpl] = useState(null); // State to hold ZPL for manual printing
+  const [lastBoxId, setLastBoxId] = useState(null); // ID of the last completed box (for mark-printed)
   const [lastReprintClick, setLastReprintClick] = useState(0);
   const [reprintCount, setReprintCount] = useState({});
+  const [loadingOpenBox, setLoadingOpenBox] = useState(false); // true while fetching open box on model change
+  const [unprintedBox, setUnprintedBox] = useState(null);       // closed box that was never printed
+  const [printError, setPrintError] = useState(null);            // error message shown inside PrintModal (no alert)
 
 
   // ─── Config state (per-model upb) ───────────────────────────────────────────
@@ -324,6 +411,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
   // ─── Ref for input focus ────────────────────────────────────────────────────
   const inputRef = useRef(null);
+  const isScanningRef = useRef(false); // Prevents concurrent / double-click scans
 
   // ─── Log helper ─────────────────────────────────────────────────────────────
   const addLog = useCallback((type, msg) => {
@@ -335,6 +423,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   const loadHistory = useCallback(async (startDate, endDate) => {
     if (DEMO_MODE) return;
 
+
     let url = `/pack/boxes`;
     if (startDate && endDate) {
       url += `?startDate=${startDate}&endDate=${endDate}`;
@@ -343,23 +432,26 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       url += `?date=${today}`;
     }
 
+
     try {
       const res = await apiFetch("GET", url);
-      if (res?.success && res.boxes?.length) {
-        setHistory(res.boxes.map(b => ({
+      if (res?.success && res.boxes?.length) {        setHistory(res.boxes.map(b => ({
           boxNum: b.box_number,
           boxCode: b.box_code,
           model: b.model,
           upb: b.units_per_box,
           serials: Array.isArray(b.serials) ? b.serials.map(s => typeof s === 'object' ? s : { serial: s }) : [],
           timestamp: b.packed_at,
-          status: "Printed",
+          status: b.status === 'printed' ? 'Printed' : b.status === 'closed' ? 'Closed (Unprinted)' : 'Open',
         })));
         const maxBox = Math.max(...res.boxes.map(b => b.box_number));
         setBoxNumber(prev => Math.max(prev, maxBox + 1));
         setStats(prev => ({ ...prev, boxes: res.boxes.length, units: res.boxes.reduce((a, b) => a + (b.serials?.length || 0), 0) }));
+      } else {
+        setHistory([]);
       }
     } catch (e) {
+      console.error(`[BOX HISTORY FRONTEND] Error:`, e);
       addLog("warn", "Could not load box history from server.");
     }
   }, [apiFetch, todayStr, addLog]);
@@ -416,7 +508,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       .then(res => {
         if (res?.success && res.configs?.length) {
           const map = {};
-          res.configs.forEach(c => { map[c.model] = c.units_per_box; });
+          res.configs.forEach(c => { map[c.model] = { units_per_box: c.units_per_box, description: c.description }; });
           setPackConfig(map);
         }
       })
@@ -434,26 +526,67 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     return DEFAULT_UPB;
   }, [packConfig]);
 
-  // ─── Fetch current open box state ────────────────────────────────────────────────
+  // ─── Fetch current open box state from the focused endpoint ──────────────────
   const syncOpenBox = useCallback(async (m) => {
-    if (!m) return;
+    if (!m || DEMO_MODE) return;
     const today = todayStr ? todayStr() : new Date().toISOString().slice(0, 10);
+
+    setLoadingOpenBox(true);
+    setUnprintedBox(null); // clear any stale warning from a previous model
+
     try {
-      const res = await apiFetch("GET", `/pack/boxes?date=${today}&model=${encodeURIComponent(m.name)}`);
-      if (res?.success && res.boxes?.length) {
-        const openBox = res.boxes.find(b => b.status === 'open');
-        if (openBox) {
-          setBoxNumber(openBox.box_number);
-          setCurrentSerials(openBox.serials || []);
-          addLog("info", `Session restored: Box #${openBox.box_number} is currently open.`);
-        } else {
-          const maxBox = Math.max(...res.boxes.map(b => b.box_number));
-          setBoxNumber(maxBox + 1);
+      const res = await apiFetch("GET", `/pack/open-box?model=${encodeURIComponent(m.name)}&date=${today}`);
+
+      if (res?.success) {
+        if (res.openBox) {
+          // ── Case A: Partial open box — resume scanning ──
+          // Apply server-authoritative UPB so the UI always shows the correct slot count
+          const serverUpb = res.openBox.units_per_box;
+          if (serverUpb && serverUpb !== m.upb) {
+            const refreshed = { ...m, upb: serverUpb };
+            setSelectedModel(refreshed);
+            try { localStorage.setItem(STORAGE_KEY_MODEL, JSON.stringify(refreshed)); } catch {}
+          }
+          setBoxNumber(res.openBox.box_number);
+          setCurrentSerials(res.openBox.serials || []);
+          setLastBoxId(res.openBox.id);
+          if (res.closedUnprintedBox) {
+            setUnprintedBox(res.closedUnprintedBox);
+            setLastZpl(res.closedUnprintedBox.zpl);
+          } else {
+            setUnprintedBox(null);
+          }
+          const count = (res.openBox.serials || []).length;
+          addLog("info", `Resumed: Box #${res.openBox.box_number} — ${count}/${serverUpb ?? m.upb} scanned`);
+
+        } else if (res.closedUnprintedBox) {
+          // ── Case B: Last box closed but label never printed — show amber banner ──
           setCurrentSerials([]);
+          setBoxNumber(res.nextBoxNumber ?? 1);
+          setUnprintedBox(res.closedUnprintedBox);
+          setLastZpl(res.closedUnprintedBox.zpl);
+          setLastBoxId(res.closedUnprintedBox.id);
+          // Sync UPB from closed box too (so next box uses correct slot count)
+          const closedUpb = res.closedUnprintedBox.units_per_box;
+          if (closedUpb && closedUpb !== m.upb) {
+            const refreshed = { ...m, upb: closedUpb };
+            setSelectedModel(refreshed);
+            try { localStorage.setItem(STORAGE_KEY_MODEL, JSON.stringify(refreshed)); } catch {}
+          }
+          addLog("warn", `⚠️ Box #${res.closedUnprintedBox.box_number} closed but NOT printed — reprint required`);
+
+        } else {
+          // ── Case C: All clear — start fresh from next box number ──
+          setCurrentSerials([]);
+          setBoxNumber(res.nextBoxNumber ?? 1);
+          setUnprintedBox(null);
+          addLog("info", `Ready: starting Box #${res.nextBoxNumber ?? 1}`);
         }
       }
     } catch (e) {
       addLog("warn", "Could not sync open box state from server.");
+    } finally {
+      setLoadingOpenBox(false);
     }
   }, [apiFetch, todayStr, addLog]);
 
@@ -463,7 +596,10 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       if (!confirm(`Switching model will clear current box (${currentSerials.length} serial(s)). Continue?`)) return;
     }
     const upb = getUpb(m.name);
-    setSelectedModel({ ...m, upb });
+    const modelToSave = { ...m, upb };
+    setSelectedModel(modelToSave);
+    // ── Persist selection so it survives reload / logout ──────────────────────
+    try { localStorage.setItem(STORAGE_KEY_MODEL, JSON.stringify(modelToSave)); } catch {}
     setCurrentSerials([]);
     setInlineError("");
     setInputState("");
@@ -474,14 +610,39 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     setTimeout(() => inputRef.current?.focus(), 100);
   }, [currentSerials, getUpb, addLog, syncOpenBox]);
 
+  // ─── On mount: sync open box for the model restored from localStorage ───────
+  const hasRestoredRef = useRef(false);
+  useEffect(() => {
+    if (hasRestoredRef.current) return;        // only run once on mount
+    hasRestoredRef.current = true;
+    if (!selectedModel) return;
+
+    // Refresh UPB in case packConfig has been updated since last save
+    const upb = getUpb(selectedModel.name);
+    if (upb !== selectedModel.upb) {
+      const refreshed = { ...selectedModel, upb };
+      setSelectedModel(refreshed);
+      try { localStorage.setItem(STORAGE_KEY_MODEL, JSON.stringify(refreshed)); } catch {}
+    }
+
+    // Restore open-box state from server (also detects unprinted boxes)
+    syncOpenBox(selectedModel);
+    addLog("info", `Restored session for model: ${selectedModel.name}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — only runs once on mount
+
+
   // ─── Add serial validation ───────────────────────────────────────────────────
   const addSerial = useCallback(async () => {
+    if (isScanningRef.current) return;
     const serial = serialInput.trim().toUpperCase();
     if (!serial) return;
     if (!selectedModel) { setInlineError("✗ Select a model first."); setInputState("err"); return; }
 
-    const m = selectedModel;
-    setInlineError("");
+    isScanningRef.current = true;
+    try {
+      const m = selectedModel;
+      setInlineError("");
 
     // 1. Basic Length Check
     if (serial.length < 10) {
@@ -527,12 +688,12 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       packBeep(false); setSerialInput(""); return;
     }
 
-    // 5. Sequence Validation (Same-Box & Cross-Box)
+    // 5. Sequence Validation
     if (currentSerials.length > 0) {
-      // Same-Box Sequence
+      // ── 5a. Same-Box Sequence: Gaps within the current box ──
       const lastItem = currentSerials[currentSerials.length - 1];
       const lastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
-      if (currentNum !== lastNum + 1) {
+      if (lastNum > 0 && currentNum !== lastNum + 1) {
         setInputState("err");
         setInlineError(`✗ Sequence Gap! Expected ${lastNum + 1}, got ${currentNum}`);
         addLog("err", `Rejected "${serial}" — gap in box sequence (Expected ${lastNum + 1})`);
@@ -540,38 +701,49 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
         packBeep(false); setSerialInput(""); return;
       }
     } else {
-      // Cross-Box Sequence / First Box of Day
-      const prevBox = history
-        .filter(b => b.model === m.name)
-        .sort((a, b) => b.boxNum - a.boxNum)[0];
+      // ── 5b. Cross-Box Sequence: Gaps between boxes (Scan #1 of a new box) ──
+      let prevBoxNum = null;
+      let prevLastNum = null;
 
-      if (prevBox) {
-        const lastItem = prevBox.serials[prevBox.serials.length - 1];
-        const lastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
-        if (currentNum !== lastNum + 1) {
-          setInputState("err");
-          setInlineError(`✗ Cross-box Gap! Expected ${lastNum + 1}, got ${currentNum}`);
-          addLog("err", `Rejected "${serial}" — jump from previous box (Expected ${lastNum + 1})`);
-          setStats(p => ({ ...p, errors: p.errors + 1 }));
-          packBeep(false); setSerialInput(""); return;
+      // 1. Check lastCompletedBox first (immediate state from the box just packed)
+      if (lastCompletedBox && lastCompletedBox.length > 0) {
+        const lastItem = lastCompletedBox[lastCompletedBox.length - 1];
+        prevLastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
+        prevBoxNum = boxNumber > 1 ? boxNumber - 1 : 1;
+      }
+
+      // 2. Check today's history for this model to find the latest completed box
+      const modelBoxes = history.filter(b => b.model === m.name && b.serials?.length > 0);
+      if (modelBoxes.length > 0) {
+        const latestHistBox = modelBoxes.reduce((latest, b) => (!latest || Number(b.boxNum) > Number(latest.boxNum) ? b : latest), null);
+        if (latestHistBox && latestHistBox.serials?.length > 0) {
+          const histLastItem = latestHistBox.serials[latestHistBox.serials.length - 1];
+          const histLastNum = extractSeqNum(typeof histLastItem === 'object' ? histLastItem.serial : histLastItem);
+          if (!prevBoxNum || Number(latestHistBox.boxNum) >= Number(prevBoxNum)) {
+            prevLastNum = histLastNum;
+            prevBoxNum = latestHistBox.boxNum;
+          }
         }
-      } else if (sRange?.model && sRange.model === m.name) {
-        // First box of the day must start at range start
-        if (currentNum !== sRange.start) {
+      }
+
+      // If a previous box exists for this model, enforce strict continuation
+      if (prevLastNum !== null && prevLastNum > 0) {
+        const expectedNext = prevLastNum + 1;
+        if (currentNum !== expectedNext) {
           setInputState("err");
-          setInlineError(`✗ Must start from range start: ${sRange.start}`);
-          addLog("err", `Rejected "${serial}" — first scan must be ${sRange.start}`);
+          setInlineError(`✗ Cross-box Gap! Expected ${expectedNext} (Box #${prevBoxNum} ended at ${prevLastNum}), got ${currentNum}`);
+          addLog("err", `Rejected "${serial}" — cross-box gap (Expected ${expectedNext} after Box #${prevBoxNum})`);
           setStats(p => ({ ...p, errors: p.errors + 1 }));
           packBeep(false); setSerialInput(""); return;
         }
       }
     }
 
-    try {
-      const res = await apiFetch("POST", "/pack/scan", {
+    const res = await apiFetch("POST", "/pack/scan", {
         date: todayStr ? todayStr() : new Date().toISOString().slice(0, 10),
         model: m.name,
-        serial: serial
+        serial: serial,
+        units_per_box: m.upb,
       });
 
       if (!res || res.success === false) {
@@ -597,23 +769,39 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
       // Server decides whether this completed box requires printing
       if (res.print?.shouldPrint && res.print?.zpl) {
-
         addLog("ok", `Box #${res.box_number} completed. Sending master label to printer...`);
 
+        let printSucceeded = false;
         try {
           const printerName = appSettings.printerName || "ZDesigner ZT231-300dpi ZPL";
           await qzService.printZPL(res.print.zpl, printerName);
-          addLog("ok", `✅ Master label sent successfully to ${printerName} for Box #${res.print.boxNumber}`);
+          addLog("ok", `✅ Master label sent to ${printerName} for Box #${res.print.boxNumber}`);
+          printSucceeded = true;
 
+          // Mark this box as printed so it won't show as 'unprinted' on the next session restore
+          if (res.print.box_id) {
+            try {
+              await apiFetch("POST", `/pack/boxes/${res.print.box_id}/printed`, {});
+            } catch { /* non-critical — worst case user sees reprint banner next session */ }
+          }
         } catch (printError) {
           console.error("Auto Print Error:", printError);
-          addLog("err",`❌ Box completed, but printing failed: ${printError.message}`);
-
+          addLog("err", `❌ Box completed, but printing failed: ${printError.message}`);
+          // Show the unprinted box banner IMMEDIATELY so the user can retry without reloading
+          setUnprintedBox({
+            id:            res.print.box_id,
+            box_number:    res.print.boxNumber,
+            box_code:      res.print.boxCode,
+            units_per_box: res.units_per_box,
+            serials:       res.serials || [],
+            zpl:           res.print.zpl,
+          });
         }
 
-        // Continue normal box completion workflow
+        // Continue normal box completion workflow (even if print failed — box is closed on server)
         setLastCompletedBox(res.serials);
         setLastZpl(res.print.zpl);
+        setLastBoxId(res.print.box_id ?? res.box_id ?? null);
         setCurrentSerials([]);
         setShowPrintModal(true);
         loadHistory();
@@ -623,8 +811,10 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       setInlineError("✗ Network error while saving scan.");
       addLog("err", `Network error: ${e.message}`);
       setSerialInput("");
+    } finally {
+      isScanningRef.current = false;
     }
-  }, [serialInput, selectedModel, addLog, todayStr, apiFetch, sRange, currentSerials, history]);
+  }, [serialInput, selectedModel, addLog, todayStr, apiFetch, sRange, currentSerials, history, lastCompletedBox, boxNumber]);
 
   // ─── Remove serial from current box ─────────────────────────────────────────
   const removeSerial = useCallback(async (idx) => {
@@ -656,17 +846,6 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   }, [currentSerials, apiFetch, addLog]);
 
 
-  // ─── Auto-close print modal after 3 seconds ──────────────────────────────────
-  useEffect(() => {
-    if (showPrintModal) {
-      const timer = setTimeout(() => {
-        setShowPrintModal(false);
-        setLastCompletedBox(null);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [showPrintModal]);
-
   const demoScan = useCallback(() => {
     if (!selectedModel) return;
     const m = selectedModel;
@@ -677,23 +856,101 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     setSerialInput(prefix + seq);
   }, [selectedModel]);
 
-  const handleManualPrint = async () => {
-    if (!lastZpl) {
-      addLog("err", "❌ No ZPL data available to print. Please complete a box first.");
-      alert("No label data found. Please complete a box first.");
+  // ─── Auto-close print modal after 8s only on SUCCESS (keep open if error) ──
+  useEffect(() => {
+    // If there is an error or unprinted issue, do NOT auto-close so operator can read & reprint
+    const hasIssue = !!printError || (unprintedBox && unprintedBox.id === lastBoxId);
+    if (showPrintModal && !hasIssue) {
+      const timer = setTimeout(() => {
+        setShowPrintModal(false);
+        setLastCompletedBox(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [showPrintModal, printError, unprintedBox, lastBoxId]);
+
+  // ─── Manual / reprint — no alert() ever, errors shown inside modal ───────────
+  // zpl / boxId can be passed explicitly (from modal or amber banner),
+  // otherwise falls back to lastZpl / lastBoxId, or calls /pack/manual-print.
+  const handleManualPrint = useCallback(async (overrideZpl, overrideBoxId) => {
+    let zpl   = overrideZpl   ?? lastZpl;
+    let boxId = overrideBoxId ?? lastBoxId;
+
+    const printerName = appSettings.printerName || "ZDesigner ZT231-300dpi ZPL";
+
+    // ── Step 1: ensure ZPL is available ──────────────────────────────────────
+    if (!zpl) {
+      if (!selectedModel) {
+        addLog("err", "Select a model before printing.");
+        return;
+      }
+      try {
+        addLog("info", `Requesting label for Box #${boxNumber} (${selectedModel.name}) from server…`);
+        const today = todayStr ? todayStr() : new Date().toISOString().slice(0, 10);
+        const svr = await apiFetch("POST", "/pack/manual-print", {
+          date: today,
+          model: selectedModel.name,
+          box_id: boxId || (unprintedBox?.id ?? null),
+          box_number: boxNumber,
+          units_per_box: selectedModel.upb,
+        });
+        if (!svr || !svr.success || !svr.zpl) {
+          throw new Error(svr?.message || "Server could not generate label.");
+        }
+        zpl   = svr.zpl;
+        boxId = svr.box_id;
+        setLastZpl(zpl);
+        setLastBoxId(boxId);
+        if (svr.serials) setLastCompletedBox(svr.serials);
+      } catch (err) {
+        addLog("err", `❌ Could not generate label: ${err.message}`);
+        // Show the modal with error so the user sees it inline (no alert)
+        setPrintError(`❌ Could not generate label: ${err.message}`);
+        setShowPrintModal(true);
+        return;
+      }
+    }
+
+    // ── Step 2: send to printer ───────────────────────────────────────────────
+    try {
+      addLog("info", `Sending label to ${printerName}…`);
+      await qzService.printZPL(zpl, printerName);
+      addLog("ok", "✅ Label sent to printer successfully!");
+      setPrintError(null);  // clear any prior error
+
+      // Mark box as printed so amber banner won't reappear
+      if (boxId) {
+        try {
+          await apiFetch("POST", `/pack/boxes/${boxId}/printed`, {});
+          setUnprintedBox(null);
+          addLog("ok", `Box marked as printed.`);
+        } catch { /* non-critical — worst case banner shows again next session */ }
+      }
+
+      // Clear current box, open modal, advance to next box
+      setCurrentSerials([]);
+      setUnprintedBox(null);
+      setShowPrintModal(true);
+      loadHistory();
+      if (selectedModel) syncOpenBox(selectedModel);
+
+    } catch (e) {
+      addLog("err", `❌ Print failed: ${e.message}`);
+      // Show error in modal — no browser alert
+      setPrintError(`❌ Print failed: ${e.message} — Please ensure QZ Tray is running.`);
+      setShowPrintModal(true);
+    }
+  }, [lastZpl, lastBoxId, appSettings, apiFetch, addLog, selectedModel, boxNumber, todayStr, unprintedBox, loadHistory, syncOpenBox]);
+
+  // ─── Reprint the label for the last closed-but-unprinted box ────────────────
+  const handleReprintUnprinted = useCallback(() => {
+    if (!unprintedBox) {
+      addLog("err", "No unprinted box data available.");
       return;
     }
-    try {
-      const printerName = appSettings.printerName || "ZDesigner ZT231-300dpi ZPL";
-      addLog("info", `Manually printing label to ${printerName}...`);
-      await qzService.printZPL(lastZpl, printerName);
-      addLog("ok", "✅ Manual print successful!");
-      alert("✅ Label sent to printer successfully!");
-    } catch (e) {
-      addLog("err", `❌ Manual print failed: ${e.message}`);
-      alert(`❌ Print Failed: ${e.message}`);
-    }
-  };
+    // Delegate entirely to handleManualPrint — same flow, same modal, no duplication
+    return handleManualPrint(unprintedBox.zpl, unprintedBox.id);
+  }, [unprintedBox, handleManualPrint, addLog]);
 
   const handleTestPrint = async () => {
     try {
@@ -711,12 +968,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   const handleCheckPrinters = async () => {
   try {
     const printers = await qzService.getPrinters();
-
-    console.log("AVAILABLE PRINTERS:", printers);
-
-    alert(
-      `Printers Found:\n\n${printers.join("\n")}`
-    );
+    alert(`Printers Found:\n\n${printers.join("\n")}`);
 
   } catch (error) {
     console.error(error);
@@ -755,16 +1007,11 @@ const handleZPLTestPrint = async () => {
     ^XZ
     `;
 
-        console.log("🚀 Sending test ZPL...");
-
         await qzService.printZPL(testZPL);
-
         alert("✅ Test ZPL sent successfully!");
 
       } catch (error) {
-
         console.error("❌ Test Print Error:", error);
-
         alert(`❌ Print Failed:\n${error.message}`);
       }
     };
@@ -854,51 +1101,8 @@ const handleZPLTestPrint = async () => {
     }
 
     // 3. Date Filter
-    const now = new Date();
-    const startOfDay = (d) => {
-      const date = new Date(d);
-      date.setHours(0, 0, 0, 0);
-      return date;
-    };
-
-    const endOfDay = (d) => {
-      const date = new Date(d);
-      date.setHours(23, 59, 59, 999);
-      return date;
-    };
-
-    let startDate, endDate;
-
-    if (historyDateFilter === "today") {
-      startDate = startOfDay(now);
-      endDate = endOfDay(now);
-    } else if (historyDateFilter === "yesterday") {
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      startDate = startOfDay(yesterday);
-      endDate = endOfDay(yesterday);
-    } else if (historyDateFilter === "7days") {
-      startDate = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
-      endDate = endOfDay(now);
-    } else if (historyDateFilter === "30days") {
-      startDate = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
-      endDate = endOfDay(now);
-    } else if (historyDateFilter === "custom") {
-      if (!customDateRange.start || !customDateRange.end) {
-        // If custom range is not set, don't filter or show all
-        return result;
-      }
-      startDate = startOfDay(new Date(customDateRange.start));
-      endDate = endOfDay(new Date(customDateRange.end));
-    }
-
-    if (startDate && endDate) {
-      result = result.filter(b => {
-        const d = new Date(b.timestamp);
-        return d >= startDate && d <= endDate;
-      });
-    }
-
+    // Date filtering is already handled by the API call in loadHistory.
+    // Redundant client-side filtering is removed to avoid timezone issues.
     return result;
   })();
 
@@ -909,32 +1113,82 @@ const handleZPLTestPrint = async () => {
     const m = selectedModel;
     const ts = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     const serialsToPrint = lastCompletedBox || currentSerials;
+    const hasPrintIssue = !!printError || (unprintedBox && unprintedBox.id === lastBoxId);
+
+    const closeModal = () => {
+      setShowPrintModal(false);
+      setLastCompletedBox(null);
+      setPrintError(null);
+    };
+
     return (
-      <div className="pk-print-modal-overlay visible">
-        <div className="pk-print-modal">
-          <div className="pk-print-title">📦 Box Completed & Printed</div>
-          <div className="pk-print-sub">The box has been automatically saved and the label has been sent to the printer.</div>
-          <div className="pk-label-preview">
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <div>
-                <div className="pk-label-brand">ATOMBERG</div>
-                <div className="pk-label-model">{m.name} · {m.customer}</div>
-              </div>
-              <div style={{ textAlign: "right", opacity: .7, fontSize: 11 }}>
-                <div>Box #{boxNumber}</div>
-                <div>{m.upb} units</div>
-              </div>
-            </div>
-            <div className="pk-label-serials">
-              {serialsToPrint.map((s, i) => (
-                <div key={i} className="pk-label-serial-item">S{i + 1}: {typeof s === 'object' ? s.serial : s}</div>
-              ))}
-            </div>
-            <div className="pk-label-footer">
-              <span>QR: {serialsToPrint[0]?.serial?.slice(-5) || (typeof serialsToPrint[0] === 'string' ? serialsToPrint[0].slice(-5) : "...")}…{serialsToPrint[serialsToPrint.length - 1]?.serial?.slice(-5) || (typeof serialsToPrint[serialsToPrint.length - 1] === 'string' ? serialsToPrint[serialsToPrint.length - 1].slice(-5) : "...")}</span>
-              <span>{ts}</span>
-            </div>
+      <div className="pk-print-modal-overlay visible" onClick={closeModal}>
+        <div className="pk-print-modal" onClick={e => e.stopPropagation()}>
+
+          {/* ── Header ── */}
+          <div className="pk-print-title">
+            {hasPrintIssue ? "⚠️ Box Completed — Print Pending" : "📦 Box Completed"}
           </div>
+          <div className="pk-print-sub" style={{ color: hasPrintIssue ? "#b45309" : undefined }}>
+            {hasPrintIssue
+              ? "The box has been closed and saved. Click Reprint Label to print the master label."
+              : "The box has been saved and the label was sent to the printer."
+            }
+          </div>
+
+          {/* ── Error banner (inline, no alert) ── */}
+          {printError && (
+            <div style={{
+              background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 7,
+              padding: "8px 12px", fontSize: 11, color: "#991b1b", marginTop: 8
+            }}>
+              {printError}
+            </div>
+          )}
+
+          {/* ── Label preview ── */}
+          {serialsToPrint.length > 0 && (
+            <div className="pk-label-preview">
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <div>
+                  <div className="pk-label-brand">ATOMBERG</div>
+                  <div className="pk-label-model">{m.name} · {m.customer}</div>
+                </div>
+                <div style={{ textAlign: "right", opacity: .7, fontSize: 11 }}>
+                  <div>Box #{unprintedBox?.box_number || boxNumber}</div>
+                  <div>{serialsToPrint.length} units</div>
+                </div>
+              </div>
+              <div className="pk-label-serials">
+                {serialsToPrint.map((s, i) => (
+                  <div key={i} className="pk-label-serial-item">S{i + 1}: {typeof s === 'object' ? s.serial : s}</div>
+                ))}
+              </div>
+              <div className="pk-label-footer">
+                <span>QR: {serialsToPrint[0]?.serial?.slice(-5) || (typeof serialsToPrint[0] === 'string' ? serialsToPrint[0].slice(-5) : "…")}…{serialsToPrint[serialsToPrint.length - 1]?.serial?.slice(-5) || (typeof serialsToPrint[serialsToPrint.length - 1] === 'string' ? serialsToPrint[serialsToPrint.length - 1].slice(-5) : "…")}</span>
+                <span>{ts}</span>
+              </div>
+            </div>
+          )}
+
+          {/* ── Action buttons ── */}
+          <div style={{ display: "flex", gap: 10, marginTop: 14, justifyContent: "flex-end" }}>
+            <button
+              className="btn btn-amb"
+              style={{ padding: "8px 18px", fontSize: 12 }}
+              onClick={() => handleManualPrint(lastZpl, lastBoxId)}
+            >
+              🖨️ {hasPrintIssue ? "Reprint Label" : "Reprint"}
+            </button>
+            <button
+              className="btn"
+              style={{ padding: "8px 14px", fontSize: 12, background: "var(--g100)", color: "var(--g700)", border: "1px solid var(--g300)" }}
+              onClick={closeModal}
+            >
+              Close
+            </button>
+          </div>
+
         </div>
       </div>
     );
@@ -1027,23 +1281,19 @@ const handleZPLTestPrint = async () => {
               <div className="pk-stat-v" style={{ color: stats.errors > 0 ? "#dc2626" : "var(--navy)" }}>{stats.errors}</div>
               <div className="pk-stat-l">Scan Errors</div>
             </div>
-            <button className="btn btn-navy" style={{ padding: "8px 12px", fontSize: 11, height: 'fit-content' }} onClick={handleTestPrint}>🖨️ Test Printer</button>
-            <button onClick={handleCheckPrinters}>
-              🖨️ Check Printers
-            </button>
 
-            <button
-            type="button"
-            onClick={handleZPLTestPrint}
-          >
-            🖨️ Test Zebra ZPL
-          </button>
             {selectedModel && (
               <div className="pk-stat" style={{ background: "#eff6ff", border: "1px solid #bfdbfe" }}>
                 <div className="pk-stat-v" style={{ color: "#1d4ed8" }}>{currentSerials.length}/{selectedModel.upb}</div>
                 <div className="pk-stat-l">Current Box</div>
               </div>
             )}
+            <button className="btn btn-navy" style={{ padding: "8px 12px", fontSize: 11, height: 'fit-content' }} onClick={handleZPLTestPrint}>
+              🖨️ Test Printer
+            </button>
+            <button className="btn btn-navy" style={{ padding: "8px 12px", fontSize: 11, height: 'fit-content' }} onClick={handleCheckPrinters}>
+              🖨️ Check Printers
+            </button>
           </div>
         </div>
 
@@ -1051,19 +1301,33 @@ const handleZPLTestPrint = async () => {
           <div className="pk-grid">
             <div className="pk-sidebar">
               <div className="pk-sidebar-title">Select Model</div>
-              {allModels.filter(m => !sRange?.model || m.name === sRange.model).map((m, i) => {
+              {allModels.map((m, i) => {
                 const upb = getUpb(m.name);
                 const isSelected = selectedModel?.name === m.name;
+                const isLoading = isSelected && loadingOpenBox;
                 const is8inch = ["FG0494", "FG0495", "FG0496"].includes(m.name);
                 const is6inch = ["FG0482", "FG0483", "FG0484"].includes(m.name);
+                const hasActiveRange = sRange?.model === m.name && sRange?.start && sRange?.end;
                 return (
-                  <div key={m.name} className={`pk-model-card${isSelected ? " selected" : ""}`} onClick={() => handleSelectModel({ ...m, upb })}>
+                  <div
+                    key={m.name}
+                    className={`pk-model-card${isSelected ? " selected" : ""}${isLoading ? " loading" : ""}`}
+                    onClick={() => handleSelectModel({ ...m, upb })}
+                  >
                     <div className="pk-model-top">
                       <span className="pk-model-code">{m.name}</span>
-                      {is6inch && <span className="pk-model-badge badge-6">6 INCH</span>}
-                      {is8inch && <span className="pk-model-badge badge-8">8 INCH</span>}
-                      {!is6inch && !is8inch && <span className="pk-model-badge">{m.customer}</span>}
+                      {isLoading
+                        ? <span style={{ fontSize: 10, color: "#1e40af", fontWeight: 600 }}>⟳ syncing…</span>
+                        : is6inch ? <span className="pk-model-badge badge-6">6 INCH</span>
+                        : is8inch ? <span className="pk-model-badge badge-8">8 INCH</span>
+                        : <span className="pk-model-badge">{m.customer}</span>
+                      }
                     </div>
+                    {hasActiveRange && (
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "#065f46", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 4, padding: "1px 5px", marginTop: 3, display: "inline-block" }}>
+                        ✓ RANGE SET: {sRange.start}–{sRange.end}
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, color: "var(--g600)", marginTop: 2 }}>{m.customer}</div>
                     <div className="pk-model-qty">{upb} units / box</div>
                   </div>
@@ -1089,6 +1353,43 @@ const handleZPLTestPrint = async () => {
                 <div className="al al-info">👈 Select a model on the left to start packing.</div>
               )}
 
+              {/* ── Loading banner shown while syncing open box from server ── */}
+              {loadingOpenBox && selectedModel && (
+                <div className="pk-syncing-banner">
+                  <div className="pk-spin" />
+                  <div>
+                    <div>Checking for open box…</div>
+                    <div style={{ fontWeight: 400, fontSize: 11, opacity: .75 }}>
+                      Fetching last scan session for <strong>{selectedModel.name}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Unprinted box warning — shown when last closed box has no printed_at ── */}
+              {unprintedBox && !loadingOpenBox && (
+                <div className="pk-unprinted-banner">
+                  <div className="pk-unprinted-icon">⚠️</div>
+                  <div className="pk-unprinted-body">
+                    <div className="pk-unprinted-title">
+                      Box #{unprintedBox.box_number} was completed but the label was NOT printed
+                    </div>
+                    <div className="pk-unprinted-sub">
+                      {unprintedBox.box_code} · {unprintedBox.units_per_box} units packed
+                      &nbsp;— Print the label before scanning the next box to keep records accurate.
+                    </div>
+                    <div className="pk-unprinted-actions">
+                      <button className="btn btn-amb" style={{ padding: "6px 14px", fontSize: 11 }} onClick={handleReprintUnprinted}>
+                        🖨️ Reprint Label
+                      </button>
+                      <button className="btn" style={{ padding: "6px 12px", fontSize: 11, background: "var(--g100)", color: "var(--g700)", border: "1px solid var(--g300)" }} onClick={() => { setUnprintedBox(null); addLog("warn", `Unprinted label for Box #${unprintedBox.box_number} dismissed by operator.`); }}>
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {selectedModel && currentSerials.length >= selectedModel.upb && (
                 <div className="pk-ready-banner">
                   <div className="pk-ready-icon">📦</div>
@@ -1096,26 +1397,26 @@ const handleZPLTestPrint = async () => {
                     <div className="pk-ready-title">Box Full — Ready to Print</div>
                     <div className="pk-ready-sub">{selectedModel.upb} serials packed in Box #{boxNumber}. Print modal will open automatically.</div>
                   </div>
-                  <button className="btn btn-grn" style={{ padding: "8px 16px" }} onClick={() => { setShowPrintModal(true); handleManualPrint(); }}>🖨️ Print Label</button>
+                  <button className="btn btn-grn" style={{ padding: "8px 16px" }} onClick={() => handleManualPrint()}>🖨️ Print Label</button>
                 </div>
               )}
 
-              <div className={`pk-scan-zone${!selectedModel ? " locked" : ""}`}>
+              <div className={`pk-scan-zone${!selectedModel || loadingOpenBox ? " locked" : ""}`}>
                 <div className="pk-scan-zone-title">📷 Scan Serial Number</div>
                 <div className="pk-scan-input-row">
                   <input
                     ref={inputRef}
                     type="text"
                     className={`pk-serial-input${inputState === "ok" ? " input-ok" : inputState === "err" ? " input-err" : ""}`}
-                    placeholder={selectedModel ? "Scan or type serial number…" : "Select a model first"}
+                    placeholder={selectedModel ? (loadingOpenBox ? "Restoring session…" : "Scan or type serial number…") : "Select a model first"}
                     value={serialInput}
-                    disabled={!selectedModel || currentSerials.length >= (selectedModel?.upb || 0)}
+                    disabled={!selectedModel || loadingOpenBox || currentSerials.length >= (selectedModel?.upb || 0)}
                     onChange={e => { setSerialInput(e.target.value); setInlineError(""); setInputState(""); }}
                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addSerial(); } }}
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <button className="btn btn-red" style={{ padding: "8px 14px" }} onClick={addSerial} disabled={!selectedModel || !serialInput.trim()}>
+                  <button className="btn btn-red" style={{ padding: "8px 14px" }} onClick={addSerial} disabled={!selectedModel || loadingOpenBox || !serialInput.trim()}>
                     Add
                   </button>
                   {DEMO_MODE && (
@@ -1212,8 +1513,8 @@ const handleZPLTestPrint = async () => {
               )}
             </div>
 
-            <div className="tbl-wrap" style={{ background: "#fff", borderRadius: 9, border: "1px solid var(--g200)", overflow: "hidden" }}>
-              <table>
+            <div className="tbl-wrap" style={{ background: "#fff", borderRadius: 9, border: "1px solid var(--g200)", overflowY: "auto", maxHeight: "70vh" }}>
+              <table className="pk-history-table">
                 <thead>
                   <tr>
                     <th>Box #</th>
@@ -1297,8 +1598,8 @@ const handleZPLTestPrint = async () => {
                         <tr>
                           <th>Model Name</th>
                           <th>Customer</th>
-                          <th>Description</th>
                           <th>Units / Box</th>
+                          <th>Description</th>
                           <th>Config Source</th>
                           <th style={{ textAlign: "center" }}>Edit Action</th>
                           <th style={{ textAlign: "center" }}>Delete Action</th>
@@ -1314,8 +1615,8 @@ const handleZPLTestPrint = async () => {
                             <tr key={m.name}>
                               <td><strong>{m.name}</strong></td>
                               <td>{m.customer}</td>
-                              <td>{desc || "- "}</td>
                               <td><strong style={{ color: "var(--navy)" }}>{upb}</strong></td>
+                              <td>{desc || "- "}</td>
                               <td>
                                 <span style={{ fontSize: 10, background: "#d1fae5", color: "#065f46", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>
                                   {source}

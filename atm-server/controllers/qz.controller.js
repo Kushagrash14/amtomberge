@@ -26,11 +26,10 @@ export const getCertificate = async (req, res) => {
       "utf8"
     );
 
-    res.type("text/plain").send(certificate);
+    res.type("text/plain").send(certificate.trim());
 
   } catch (error) {
-    console.error("QZ Certificate Error:", error);
-
+    console.error("❌ [QZ API] Certificate Error:", error);
     res.status(500).send("Failed to load QZ certificate");
   }
 };
@@ -58,7 +57,7 @@ export const signMessage = async (req, res) => {
       "utf8"
     );
 
-    // Create SHA512 signature
+    // Use RSA-SHA512 for broader compatibility with QZ Tray
     const signer = crypto.createSign("RSA-SHA512");
 
     signer.update(request);
@@ -69,12 +68,10 @@ export const signMessage = async (req, res) => {
       "base64"
     );
 
-    // QZ expects the base64 signature
     res.type("text/plain").send(signature);
 
   } catch (error) {
-    console.error("QZ Signing Error:", error);
-
+    console.error("❌ [QZ API] Signing Error:", error);
     res.status(500).send("Failed to sign QZ message");
   }
 };

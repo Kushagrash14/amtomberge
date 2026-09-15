@@ -31,8 +31,10 @@ const readCaCertificate = () => {
 };
 
 const createPool = () => {
-  const url = getDatabaseUrl().trim();
-  if (!url) throw new Error('DATABASE_URL_MISSING');
+  const rawUrl = getDatabaseUrl();
+  if (!rawUrl) throw new Error('DATABASE_URL_MISSING');
+  const url = rawUrl.trim();
+  if (!url) throw new Error('DATABASE_URL_EMPTY');
 
   const sslRequired = /ssl[-_]?mode=required/i.test(url)
     || /ssl=required/i.test(url)

@@ -10,7 +10,7 @@ import {
   getUsers, addUser, updateUser, deleteUser,
   verifyAdmin,
   getPackBoxes, savePackBox, getPackConfig, savePackConfig, deletePackConfig,
-  savePackScan, deletePackScan
+  savePackScan, deletePackScan, getOpenBox, markBoxPrinted, manualPrintBox
 } from '../controllers/production.controller.js';
 
 const router = express.Router();
@@ -55,9 +55,12 @@ router.delete('/users/:email', deleteUser);
 // Admin auth
 router.post('/admin/verify', verifyAdmin);
 
-router.get('/pack/boxes',   getPackBoxes);
-router.post('/pack/boxes',  savePackBox);
-router.post('/pack/scan',    savePackScan);
+router.get('/pack/boxes',          getPackBoxes);
+router.post('/pack/boxes',         savePackBox);
+router.get('/pack/open-box',       getOpenBox);
+router.post('/pack/boxes/:id/printed', markBoxPrinted);
+router.post('/pack/manual-print',  manualPrintBox);
+router.post('/pack/scan',          savePackScan);
 router.delete('/pack/scan/:itemId', deletePackScan);
 router.get('/pack/config',  getPackConfig);
 router.post('/pack/config', savePackConfig);
