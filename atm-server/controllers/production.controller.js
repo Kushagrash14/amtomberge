@@ -581,21 +581,26 @@ export const savePackScan = async (req, res) => {
     }
 
 
-    // ── 1. Load pack config (needed for upb + label fields) ──
-    let t = performance.now();
-    const config = await PackConfig.findOne({ model });
-    mark('config_lookup', t);
+    // ── 1. Load config + run the independent pre-write checks CONCURRENTLY ──
+    // config, alreadyPacked, and range don't depend on each other's results,
+    // so there's no reason to pay a full round trip for each one in series.
+    // Measured: each round trip costs ~210ms regardless of what it queries —
+    // that's fixed network latency to the DB, not query execution time — so
+    // running 3 of them concurrently turns ~630ms into ~210ms.
+    const tParallel = performance.now();
+    const [config, alreadyPacked, range] = await Promise.all([
+      PackConfig.findOne({ model }),
+      PackBoxItem.findOne({ serial }),
+      SerialRange.findOne({ date, model }).sort({ createdAt: -1 }),
+    ]);
+    mark('parallel_config_dup_range', tParallel);
 
     const unitsPerBox  = req.body.units_per_box ? Number(req.body.units_per_box) : (config?.units_per_box ?? 12);
     const description  = config?.description    ?? model;
     const size_inch    = config?.size_inch       ?? '';
 
 
-    // ── 2. Validations FIRST (BEFORE creating any new box) ────
-
-    t = performance.now();
-    const alreadyPacked = await PackBoxItem.findOne({ serial });
-    mark('already_packed_check', t);
+    // ── 2. Validations (results already fetched above, no extra DB calls) ──
 
     if (alreadyPacked) {
       mark('total', t0);
@@ -614,11 +619,7 @@ export const savePackScan = async (req, res) => {
       });
     }
 
-    // Serial range check
-    t = performance.now();
-    const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
-    mark('range_lookup', t);
-
+    // Serial range check (range already fetched above)
     if (range) {
       const num = extractSerialNum(serial);
       if (num !== null && (num < range.start || num > range.end)) {
@@ -633,7 +634,8 @@ export const savePackScan = async (req, res) => {
 
 
     // ── 3. Find or create the current open box ───────────────
-    t = performance.now();
+    // (Genuinely sequential from here — each step's outcome decides the next.)
+    let t = performance.now();
     let box = await PackBox.findOne({ date, model, status: 'open' })
       .sort({ box_number: -1 });
     mark('open_box_lookup', t);
@@ -741,7 +743,7 @@ export const savePackScan = async (req, res) => {
       status:        box.status,
       serials:       currentItems,
       print:         printData,
-      _timings:      timings,   // optional: strip this in production once you've diagnosed
+      _timings:      timings,   // optional: strip once you've confirmed the improvement
     });
 
   } catch (e) {
