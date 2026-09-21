@@ -167,11 +167,16 @@ export function parseSerial(raw) {
  * @param {string} opts.productionDate  "YYYY-MM-DD" — today, or the back-dated
  *                                      production day the operator selected
  * @param {string} opts.model           expected FG code, e.g. "FG0494"
- * @param {string} [opts.plant]         restrict to one plant ("S" or "P");
- *                                      omit to accept either
+ *
+ * Note: plant/location is NOT restricted here — both Sonipat (S) and Pune (P)
+ * serials are accepted. parseSerial() already rejects any code outside
+ * PLANT_CODES, so a bad scan still fails; we just don't further filter by
+ * which of the two valid plants it came from, and we don't key any logic
+ * off plantName — only the raw plant code matters, and it's accepted either
+ * way.
  * @returns {{ok: boolean, error?: string, parsed?: object}}
  */
-export function validateSerial(raw, { productionDate, model, plant } = {}) {
+export function validateSerial(raw, { productionDate, model } = {}) {
   const parsed = parseSerial(raw);
   if (!parsed.ok) return { ok: false, error: parsed.error, parsed };
 
@@ -181,14 +186,6 @@ export function validateSerial(raw, { productionDate, model, plant } = {}) {
 
   if (model && parsed.fgCode !== String(model).toUpperCase()) {
     return { ok: false, error: `Model mismatch — expected ${model}, scanned ${parsed.fgCode}`, parsed };
-  }
-
-  if (plant && parsed.plant !== String(plant).toUpperCase()) {
-    return {
-      ok: false,
-      error: `Wrong plant — expected ${String(plant).toUpperCase()} (${PLANT_CODES[String(plant).toUpperCase()]}), scanned ${parsed.plant} (${parsed.plantName})`,
-      parsed,
-    };
   }
 
   const expected = expectedCodesForDate(productionDate);
