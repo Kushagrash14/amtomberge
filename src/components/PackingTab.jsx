@@ -2,7 +2,7 @@
 // PACKING TAB — Incremental Saving Version
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo  } from "react";
 import { qzService } from "../utils/qzService";
 
 import {
@@ -350,9 +350,26 @@ function extractPrefix(serial) {
 }
 
 // ─── Helper: beep ─────────────────────────────────────────────────────────────
+// Module-level singleton — created once, reused for every beep for the life of the tab
+let sharedAudioCtx = null;
+function getAudioCtx() {
+  if (!sharedAudioCtx) {
+    try {
+      sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      return null;
+    }
+  }
+  // Browsers suspend contexts that were created/left idle without user interaction;
+  // resume() is a no-op if already running.
+  if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume().catch(() => {});
+  return sharedAudioCtx;
+}
+
 function packBeep(ok) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioCtx();
+    if (!ctx) return;
     const osc = ctx.createOscillator(), gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
     osc.frequency.value = ok ? 880 : 200;
@@ -659,7 +676,11 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
   // ─── Add serial validation ───────────────────────────────────────────────────
    const addSerial = useCallback(async () => {
-    if (isScanningRef.current) return;
+    if (isScanningRef.current) {
+      addLog("warn", `Scan "${serialInput.trim()}" ignored — previous scan still processing.`);
+      return;
+    }
+
     const serial = serialInput.trim().toUpperCase();   // ← must be defined here, first
     if (!serial) return;
     if (!selectedModel) { setInlineError("✗ Select a model first."); setInputState("err"); return; }
@@ -1104,10 +1125,8 @@ const handleZPLTestPrint = async () => {
     ? Math.round((currentSerials.length / selectedModel.upb) * 100)
     : 0;
 
-  const filteredHistory = (() => {
+  const filteredHistory = useMemo(() => {
     let result = history;
-
-    // 1. String Search
     if (historySearch.trim()) {
       const term = historySearch.toLowerCase();
       result = result.filter(b =>
@@ -1116,25 +1135,28 @@ const handleZPLTestPrint = async () => {
         JSON.stringify(b.serials).toLowerCase().includes(term)
       );
     }
-
-    // 2. Model Filter
     if (historyModelFilter !== "all") {
       result = result.filter(b => b.model === historyModelFilter);
     }
-
-    // 3. Date Filter
-    // Date filtering is already handled by the API call in loadHistory.
-    // Redundant client-side filtering is removed to avoid timezone issues.
     return result;
-  })();
+  }, [history, historySearch, historyModelFilter]);
 
   const allModels = models.length > 0? models : Object.keys(MODEL_UPB_DEFAULTS).map(name => ({ name, customer: "ATOMBERG" }));
 
-  const activeRanges = Array.isArray(sRange) ? sRange : (sRange?.model ? [sRange] : []);
-  const activeModelNames = new Set(activeRanges.map(r => r.model));
+  const activeRanges = useMemo(
+    () => (Array.isArray(sRange) ? sRange : (sRange?.model ? [sRange] : [])),
+    [sRange]
+  );
 
-  const productionModels = allModels.filter(m => activeModelNames.has(m.name));
+  const activeModelNames = useMemo(
+    () => new Set(activeRanges.map(r => r.model)),
+    [activeRanges]
+  );
 
+  const productionModels = useMemo(
+    () => allModels.filter(m => activeModelNames.has(m.name)),
+    [allModels, activeModelNames]
+  );
   const PrintModal = () => {
     if (!showPrintModal || !selectedModel) return null;
     const m = selectedModel;

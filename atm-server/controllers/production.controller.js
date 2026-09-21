@@ -577,25 +577,19 @@ export const savePackScan = async (req, res) => {
     }
 
 
-    // ── 1. Load pack config + run independent validation lookups in parallel ──
-    // These three queries don't depend on each other's results, so there's no
-    // reason to await them one at a time — run them concurrently instead.
-    const [config, alreadyPacked, range] = await Promise.all([
-      PackConfig.findOne({ model }),
-      PackBoxItem.findOne({ serial }),
-      SerialRange.findOne({ date, model }).sort({ createdAt: -1 }),
-    ]);
-
+    // ── 1. Load pack config (needed for upb + label fields) ──
+    const config = await PackConfig.findOne({ model });
     const unitsPerBox  = req.body.units_per_box ? Number(req.body.units_per_box) : (config?.units_per_box ?? 12);
     const description  = config?.description    ?? model;
     const size_inch    = config?.size_inch       ?? '';
 
 
-    // ── 2. Validations (results already fetched above) ───────────────────
+    // ── 2. Validations FIRST (BEFORE creating any new box) ────
 
     // Already packed in any box — this is the single source of truth for
     // duplicate detection in packing. (ProductionEntry is a separate table
     // used elsewhere and is intentionally NOT checked here — see note below.)
+    const alreadyPacked = await PackBoxItem.findOne({ serial });
     if (alreadyPacked) {
       return res.json({ success: false, message: 'Serial already packed' });
     }
@@ -610,6 +604,7 @@ export const savePackScan = async (req, res) => {
     }
 
     // Serial range check
+    const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
     if (range) {
       const num = extractSerialNum(serial);
       if (num !== null && (num < range.start || num > range.end)) {
