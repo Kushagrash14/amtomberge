@@ -230,6 +230,14 @@ export class SqlModel {
     }, projection);
   }
 
+  // ── create ───────────────────────────────────────────────────────────────
+  // Previously this did INSERT then a second round-trip SELECT (findOne) to
+  // read back the row it had just written. That second query is unnecessary:
+  // every value we'd get back is already known in-memory except the
+  // DB-generated id (which we have from result.insertId) and the
+  // DB-defaulted createdAt/updatedAt timestamps (which we approximate with
+  // "now" — close enough for immediate in-request use; the next real read
+  // from the DB will have the authoritative DB-set value).
   static async create(input) {
     if (Array.isArray(input)) {
       const created = [];
@@ -250,7 +258,13 @@ export class SqlModel {
       params,
     );
 
-    return this.findOne({ id: result.insertId });
+    const now = new Date();
+    return this.fromRow({
+      ...values,
+      id: result.insertId,
+      createdAt: values.createdAt ?? now,
+      updatedAt: values.updatedAt ?? now,
+    });
   }
 
   static getUpdateDocument(filter, update = {}, forInsert = false) {
@@ -300,6 +314,11 @@ export class SqlModel {
     return Number(rows[0]?.count || 0);
   }
 
+  // ── save ─────────────────────────────────────────────────────────────────
+  // Previously this did UPDATE then a second round-trip SELECT (findOne) to
+  // read back the row it had just written. Same reasoning as create() above:
+  // we already know every value we just wrote, so just merge it into `this`
+  // instead of re-querying.
   async save() {
     const Model = this.constructor;
     await ensureSchema();
@@ -323,8 +342,7 @@ export class SqlModel {
       params,
     );
 
-    const fresh = await Model.findOne({ id: this.id });
-    Object.assign(this, fresh);
+    Object.assign(this, values, { updatedAt: new Date() });
     return this;
   }
 }
