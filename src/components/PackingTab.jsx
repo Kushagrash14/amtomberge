@@ -4,10 +4,23 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { qzService } from "../utils/qzService";
+
 import {
   connectQZ,
   getPrinters
 } from "../services/qz.service";
+
+
+import {
+  validateSerial,
+  expectedCodesForDate,
+  buildSerial,
+  buildSerialPrefix,
+  extractPackModel,
+  extractSeqNum,
+  localTodayStr,
+  PLANT_CODES,
+} from "../utils/serialFormat";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DEMO_MODE = false;
@@ -318,17 +331,17 @@ function formatDateInd(dateStr) {
   return `${mm}${dd}${yyyy} : ${hh}:${min}:${ss} : ${dayName}`;
 }
 
-// ─── Helper: extract model code from serial (positions 4-10) ─────────────────
-function extractPackModel(serial) {
-  const s = String(serial).trim().toUpperCase();
-  return s.length >= 10 ? s.substring(4, 10) : "";
-}
+// // ─── Helper: extract model code from serial (positions 4-10) ─────────────────
+// function extractPackModel(serial) {
+//   const s = String(serial).trim().toUpperCase();
+//   return s.length >= 10 ? s.substring(4, 10) : "";
+// }
 
 // ─── Helper: extract last 5 digits as sequence number ────────────────────────
-function extractSeqNum(serial) {
-  const s = String(serial).trim();
-  return s.length >= 5 ? parseInt(s.slice(-5)) : 0;
-}
+// function extractSeqNum(serial) {
+//   const s = String(serial).trim();
+//   return s.length >= 5 ? parseInt(s.slice(-5)) : 0;
+// }
 
 // ─── Helper: everything before last 5 digits ─────────────────────────────────
 function extractPrefix(serial) {
@@ -370,6 +383,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       return null;
     }
   });
+
   const [currentSerials, setCurrentSerials] = useState([]);   // [{id, serial}, ...] in current box
   const [boxNumber, setBoxNumber] = useState(1);
   const [history, setHistory] = useState([]);                 // completed boxes
@@ -396,8 +410,15 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   const [reprintCount, setReprintCount] = useState({});
   const [loadingOpenBox, setLoadingOpenBox] = useState(false); // true while fetching open box on model change
   const [unprintedBox, setUnprintedBox] = useState(null);       // closed box that was never printed
-  const [printError, setPrintError] = useState(null);            // error message shown inside PrintModal (no alert)
+  const [printError, setPrintError] = useState(null); 
+  
+  // error message shown inside PrintModal (no alert)
 
+    // The production day the operator is working on — today, or a back-dated day
+    // chosen upstream. All serial date codes are validated against this.
+    const productionDate = todayStr ? todayStr() : localTodayStr();
+    const expectedHead   = expectedCodesForDate(productionDate);   // { head: "1A23", ... }
+    const plantCode      = (appSettings.plantCode || "").toUpperCase(); // "S" | "P" | "" = accept both
 
   // ─── Config state (per-model upb) ───────────────────────────────────────────
   const [configModel, setConfigModel] = useState("");
@@ -418,6 +439,10 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     setVlog(prev => [{ type, msg, time: nowStr() }, ...prev].slice(0, 60));
   }, []);
 
+
+  const AUTO_SUBMIT_ON_LENGTH = true;   // scanners with no Enter/Tab suffix
+
+ 
 
   // ─── Load history from API ──────────────────────────────────────────────────
   const loadHistory = useCallback(async (startDate, endDate) => {
@@ -633,9 +658,9 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
 
   // ─── Add serial validation ───────────────────────────────────────────────────
-  const addSerial = useCallback(async () => {
+   const addSerial = useCallback(async () => {
     if (isScanningRef.current) return;
-    const serial = serialInput.trim().toUpperCase();
+    const serial = serialInput.trim().toUpperCase();   // ← must be defined here, first
     if (!serial) return;
     if (!selectedModel) { setInlineError("✗ Select a model first."); setInputState("err"); return; }
 
@@ -644,105 +669,107 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       const m = selectedModel;
       setInlineError("");
 
-    // 1. Basic Length Check
-    if (serial.length < 10) {
-      setInputState("err");
-      setInlineError(`✗ Serial too short — minimum 10 characters (got ${serial.length})`);
-      addLog("err", `Rejected "${serial}" — too short`);
-      setStats(p => ({ ...p, errors: p.errors + 1 }));
-      packBeep(false); setSerialInput(""); return;
-    }
+      // 1 + 2. Full format check: date/month/year codes, FG code, plant, counter
+      const check = validateSerial(serial, {
+        productionDate,
+        model: m.name,
+        plant: plantCode || undefined,   // omit to accept both S and P
+      });
 
-    // 2. Model Verification (Frontend)
-    const scannedModel = extractPackModel(serial);
-    if (scannedModel && scannedModel !== m.name) {
-      setInputState("err");
-      setInlineError(`✗ Model Mismatch! Expected ${m.name}, found ${scannedModel}`);
-      addLog("err", `Rejected "${serial}" — model mismatch (${scannedModel})`);
-      setStats(p => ({ ...p, errors: p.errors + 1 }));
-      packBeep(false); setSerialInput(""); return;
-    }
-
-    // 3. Range Enforcement (Settings Link)
-    const currentNum = extractSeqNum(serial);
-    if (sRange?.model && sRange.model === m.name) {
-      if (currentNum === 0 || currentNum < sRange.start || currentNum > sRange.end) {
+      if (!check.ok) {
         setInputState("err");
-        setInlineError(`✗ Out of Range! Expected: ${sRange.start} - ${sRange.end}`);
-        addLog("err", `Rejected "${serial}" — out of range (${sRange.start}-${sRange.end})`);
+        setInlineError(`✗ ${check.error}`);
+        addLog("err", `Rejected "${serial}" — ${check.error}`);
         setStats(p => ({ ...p, errors: p.errors + 1 }));
-        packBeep(false); setSerialInput(""); return;
-      }
-    }
-
-    // 4. No Duplicates (Current Box + Day's History)
-    const isDupInCurrent = currentSerials.some(s => (typeof s === 'object' ? s.serial : s) === serial);
-    const isDupInHistory = history.some(b =>
-      b.model === m.name && b.serials.some(s => (typeof s === 'object' ? s.serial : s) === serial)
-    );
-    if (isDupInCurrent || isDupInHistory) {
-      setInputState("err");
-      setInlineError("✗ Duplicate Serial! Already packed today.");
-      addLog("err", `Rejected "${serial}" — duplicate found`);
-      setStats(p => ({ ...p, errors: p.errors + 1 }));
-      packBeep(false); setSerialInput(""); return;
-    }
-
-    // 5. Sequence Validation
-    if (currentSerials.length > 0) {
-      // ── 5a. Same-Box Sequence: Gaps within the current box ──
-      const lastItem = currentSerials[currentSerials.length - 1];
-      const lastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
-      if (lastNum > 0 && currentNum !== lastNum + 1) {
-        setInputState("err");
-        setInlineError(`✗ Sequence Gap! Expected ${lastNum + 1}, got ${currentNum}`);
-        addLog("err", `Rejected "${serial}" — gap in box sequence (Expected ${lastNum + 1})`);
-        setStats(p => ({ ...p, errors: p.errors + 1 }));
-        packBeep(false); setSerialInput(""); return;
-      }
-    } else {
-      // ── 5b. Cross-Box Sequence: Gaps between boxes (Scan #1 of a new box) ──
-      let prevBoxNum = null;
-      let prevLastNum = null;
-
-      // 1. Check lastCompletedBox first (immediate state from the box just packed)
-      if (lastCompletedBox && lastCompletedBox.length > 0) {
-        const lastItem = lastCompletedBox[lastCompletedBox.length - 1];
-        prevLastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
-        prevBoxNum = boxNumber > 1 ? boxNumber - 1 : 1;
+        packBeep(false);
+        setSerialInput("");
+        return;
       }
 
-      // 2. Check today's history for this model to find the latest completed box
-      const modelBoxes = history.filter(b => b.model === m.name && b.serials?.length > 0);
-      if (modelBoxes.length > 0) {
-        const latestHistBox = modelBoxes.reduce((latest, b) => (!latest || Number(b.boxNum) > Number(latest.boxNum) ? b : latest), null);
-        if (latestHistBox && latestHistBox.serials?.length > 0) {
-          const histLastItem = latestHistBox.serials[latestHistBox.serials.length - 1];
-          const histLastNum = extractSeqNum(typeof histLastItem === 'object' ? histLastItem.serial : histLastItem);
-          if (!prevBoxNum || Number(latestHistBox.boxNum) >= Number(prevBoxNum)) {
-            prevLastNum = histLastNum;
-            prevBoxNum = latestHistBox.boxNum;
-          }
-        }
-      }
-
-      // If a previous box exists for this model, enforce strict continuation
-      if (prevLastNum !== null && prevLastNum > 0) {
-        const expectedNext = prevLastNum + 1;
-        if (currentNum !== expectedNext) {
+      // 3. Range Enforcement (Settings Link)
+      const currentNum = extractSeqNum(serial);
+      if (sRange?.model && sRange.model === m.name) {
+        if (currentNum === 0 || currentNum < sRange.start || currentNum > sRange.end) {
           setInputState("err");
-          setInlineError(`✗ Cross-box Gap! Expected ${expectedNext} (Box #${prevBoxNum} ended at ${prevLastNum}), got ${currentNum}`);
-          addLog("err", `Rejected "${serial}" — cross-box gap (Expected ${expectedNext} after Box #${prevBoxNum})`);
+          setInlineError(`✗ Out of Range! Expected: ${sRange.start} - ${sRange.end}`);
+          addLog("err", `Rejected "${serial}" — out of range (${sRange.start}-${sRange.end})`);
           setStats(p => ({ ...p, errors: p.errors + 1 }));
           packBeep(false); setSerialInput(""); return;
         }
       }
-    }
 
-    const res = await apiFetch("POST", "/pack/scan", {
-        date: todayStr ? todayStr() : new Date().toISOString().slice(0, 10),
+      // 4. No Duplicates (Current Box + Day's History)
+      const isDupInCurrent = currentSerials.some(s => (typeof s === 'object' ? s.serial : s) === serial);
+      const isDupInHistory = history.some(b =>
+        b.model === m.name && b.serials.some(s => (typeof s === 'object' ? s.serial : s) === serial)
+      );
+      if (isDupInCurrent || isDupInHistory) {
+        setInputState("err");
+        setInlineError("✗ Duplicate Serial! Already packed today.");
+        addLog("err", `Rejected "${serial}" — duplicate found`);
+        setStats(p => ({ ...p, errors: p.errors + 1 }));
+        packBeep(false); setSerialInput(""); return;
+      }
+
+      // 5. Sequence Validation
+      if (currentSerials.length > 0) {
+        const lastItem = currentSerials[currentSerials.length - 1];
+        const lastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
+
+        if (lastNum <= 0) {
+          setInputState("err");
+          setInlineError("✗ Could not verify sequence — previous slot unreadable.");
+          addLog("err", `Rejected "${serial}" — previous serial in box unreadable for sequence check`);
+          setStats(p => ({ ...p, errors: p.errors + 1 }));
+          packBeep(false); setSerialInput(""); return;
+        }
+        if (currentNum !== lastNum + 1) {
+          setInputState("err");
+          setInlineError(`✗ Sequence Gap! Expected ${lastNum + 1}, got ${currentNum}`);
+          addLog("err", `Rejected "${serial}" — gap in box sequence (Expected ${lastNum + 1})`);
+          setStats(p => ({ ...p, errors: p.errors + 1 }));
+          packBeep(false); setSerialInput(""); return;
+        }
+      } else {
+        let prevBoxNum = null;
+        let prevLastNum = null;
+
+        if (lastCompletedBox && lastCompletedBox.length > 0) {
+          const lastItem = lastCompletedBox[lastCompletedBox.length - 1];
+          prevLastNum = extractSeqNum(typeof lastItem === 'object' ? lastItem.serial : lastItem);
+          prevBoxNum = boxNumber > 1 ? boxNumber - 1 : 1;
+        }
+
+        const modelBoxes = history.filter(b => b.model === m.name && b.serials?.length > 0);
+        if (modelBoxes.length > 0) {
+          const latestHistBox = modelBoxes.reduce((latest, b) => (!latest || Number(b.boxNum) > Number(latest.boxNum) ? b : latest), null);
+          if (latestHistBox && latestHistBox.serials?.length > 0) {
+            const histLastItem = latestHistBox.serials[latestHistBox.serials.length - 1];
+            const histLastNum = extractSeqNum(typeof histLastItem === 'object' ? histLastItem.serial : histLastItem);
+            if (!prevBoxNum || Number(latestHistBox.boxNum) >= Number(prevBoxNum)) {
+              prevLastNum = histLastNum;
+              prevBoxNum = latestHistBox.boxNum;
+            }
+          }
+        }
+
+        if (prevLastNum !== null && prevLastNum > 0) {
+          const expectedNext = prevLastNum + 1;
+          if (currentNum !== expectedNext) {
+            setInputState("err");
+            setInlineError(`✗ Cross-box Gap! Expected ${expectedNext} (Box #${prevBoxNum} ended at ${prevLastNum}), got ${currentNum}`);
+            addLog("err", `Rejected "${serial}" — cross-box gap (Expected ${expectedNext} after Box #${prevBoxNum})`);
+            setStats(p => ({ ...p, errors: p.errors + 1 }));
+            packBeep(false); setSerialInput(""); return;
+          }
+        }
+      }
+
+      const res = await apiFetch("POST", "/pack/scan", {
+        date: productionDate,
         model: m.name,
-        serial: serial,
+        serial,
+        plant: check.parsed.plant,
         units_per_box: m.upb,
       });
 
@@ -767,7 +794,6 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       setTimeout(() => setInputState(""), 900);
       inputRef.current?.focus();
 
-      // Server decides whether this completed box requires printing
       if (res.print?.shouldPrint && res.print?.zpl) {
         addLog("ok", `Box #${res.box_number} completed. Sending master label to printer...`);
 
@@ -778,16 +804,14 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
           addLog("ok", `✅ Master label sent to ${printerName} for Box #${res.print.boxNumber}`);
           printSucceeded = true;
 
-          // Mark this box as printed so it won't show as 'unprinted' on the next session restore
           if (res.print.box_id) {
             try {
               await apiFetch("POST", `/pack/boxes/${res.print.box_id}/printed`, {});
-            } catch { /* non-critical — worst case user sees reprint banner next session */ }
+            } catch { /* non-critical */ }
           }
         } catch (printError) {
           console.error("Auto Print Error:", printError);
           addLog("err", `❌ Box completed, but printing failed: ${printError.message}`);
-          // Show the unprinted box banner IMMEDIATELY so the user can retry without reloading
           setUnprintedBox({
             id:            res.print.box_id,
             box_number:    res.print.boxNumber,
@@ -798,7 +822,6 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
           });
         }
 
-        // Continue normal box completion workflow (even if print failed — box is closed on server)
         setLastCompletedBox(res.serials);
         setLastZpl(res.print.zpl);
         setLastBoxId(res.print.box_id ?? res.box_id ?? null);
@@ -814,7 +837,15 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     } finally {
       isScanningRef.current = false;
     }
-  }, [serialInput, selectedModel, addLog, todayStr, apiFetch, sRange, currentSerials, history, lastCompletedBox, boxNumber]);
+  }, [serialInput, selectedModel, addLog, productionDate, plantCode, apiFetch, sRange, currentSerials, history, lastCompletedBox, boxNumber, appSettings]);
+
+   useEffect(() => {
+    if (!AUTO_SUBMIT_ON_LENGTH) return;
+    if (serialInput.trim().length !== 16) return;
+    const t = setTimeout(() => addSerial(), 60);   // let the last keystroke settle
+    return () => clearTimeout(t);
+  }, [serialInput, addSerial]);
+
 
   // ─── Remove serial from current box ─────────────────────────────────────────
   const removeSerial = useCallback(async (idx) => {
@@ -850,11 +881,9 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     if (!selectedModel) return;
     const m = selectedModel;
     if (!demoCounters.current[m.name]) demoCounters.current[m.name] = 1;
-    const prefix = DEMO_PREFIXES[m.name] || ("XX26" + m.name + "P");
-    const seq = String(demoCounters.current[m.name]).padStart(5, "0");
-    demoCounters.current[m.name]++;
-    setSerialInput(prefix + seq);
-  }, [selectedModel]);
+    const seq = demoCounters.current[m.name]++;
+    setSerialInput(buildSerial(productionDate, m.name, plantCode || "S", seq));
+  }, [selectedModel, productionDate, plantCode]);
 
   // ─── Auto-close print modal after 8s only on SUCCESS (keep open if error) ──
   useEffect(() => {
@@ -1007,25 +1036,25 @@ const handleZPLTestPrint = async () => {
     ^XZ
     `;
 
-        await qzService.printZPL(testZPL);
-        alert("✅ Test ZPL sent successfully!");
+      await qzService.printZPL(testZPL);
+      alert("✅ Test ZPL sent successfully!");
 
-      } catch (error) {
-        console.error("❌ Test Print Error:", error);
-        alert(`❌ Print Failed:\n${error.message}`);
-      }
-    };
-
-  const prevSerialInput = useRef("");
-  useEffect(() => {
-    if (serialInput && serialInput !== prevSerialInput.current && serialInput.length >= 10) {
-      if (Object.values(DEMO_PREFIXES).some(p => serialInput.startsWith(p))) {
-        const timeout = setTimeout(() => addSerial(), 80);
-        return () => clearTimeout(timeout);
-      }
+    } catch (error) {
+      console.error("❌ Test Print Error:", error);
+      alert(`❌ Print Failed:\n${error.message}`);
     }
-    prevSerialInput.current = serialInput;
-  }, [serialInput, addSerial]);
+};
+
+  // const prevSerialInput = useRef("");
+  // useEffect(() => {
+  //   if (serialInput && serialInput !== prevSerialInput.current && serialInput.length >= 10) {
+  //     if (Object.values(DEMO_PREFIXES).some(p => serialInput.startsWith(p))) {
+  //       const timeout = setTimeout(() => addSerial(), 80);
+  //       return () => clearTimeout(timeout);
+  //     }
+  //   }
+  //   prevSerialInput.current = serialInput;
+  // }, [serialInput, addSerial]);
 
   const handleEditConfig = useCallback((model, upb, desc) => {
     setConfigModel(model);
@@ -1412,7 +1441,12 @@ const handleZPLTestPrint = async () => {
                     value={serialInput}
                     disabled={!selectedModel || loadingOpenBox || currentSerials.length >= (selectedModel?.upb || 0)}
                     onChange={e => { setSerialInput(e.target.value); setInlineError(""); setInputState(""); }}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addSerial(); } }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter" || e.key === "Tab") {
+                            e.preventDefault();
+                            addSerial();
+                          }
+                        }}
                     autoComplete="off"
                     spellCheck={false}
                   />
@@ -1426,6 +1460,20 @@ const handleZPLTestPrint = async () => {
                   )}
                 </div>
                 {inlineError && <div className="pk-inline-error" style={{ display: "block" }}>{inlineError}</div>}
+                  {selectedModel && (
+                    <div style={{ fontSize: 11, color: "var(--g600)", marginBottom: 8 }}>
+                      Expected for {productionDate}:{" "}
+                      <code style={{ fontWeight: 700, color: "var(--navy)" }}>
+                        {buildSerialPrefix(productionDate, selectedModel.name, plantCode || "S/P")}
+                        <span style={{ color: "var(--g400)" }}>#####</span>
+                      </code>
+                      {!plantCode && (
+                        <span style={{ marginLeft: 6, color: "var(--g500)" }}>
+                          (S = Sonipat, P = Pune)
+                        </span>
+                      )}
+                    </div>
+                  )}
               </div>
 
               {selectedModel && (

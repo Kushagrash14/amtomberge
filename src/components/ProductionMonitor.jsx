@@ -759,7 +759,11 @@ function ProductionMonitor({ onLogout }) {
         if (s.lotMode) ns.lotMode = s.lotMode === "true";
         if (s.printerName) ns.printerName = s.printerName;
       }
-      setAppSettings(ns); setIdleThrInput(ns.idleThr); setLotMode(ns.lotMode); setTargets(ns.targets.slice()); setPrinterNameInput(ns.printerName || "");
+      setAppSettings(ns); 
+      setIdleThrInput(ns.idleThr); 
+      setLotMode(ns.lotMode); 
+      setTargets(ns.targets.slice()); 
+      setPrinterNameInput(ns.printerName || "");
       if (callback) callback(ns);
     }).catch(() => { if (callback) callback(appSettings); });
   }, []);
