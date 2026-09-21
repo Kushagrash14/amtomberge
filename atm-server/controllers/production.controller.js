@@ -586,16 +586,12 @@ export const savePackScan = async (req, res) => {
 
     // ── 2. Validations FIRST (BEFORE creating any new box) ────
 
-    // Already packed in any box
+    // Already packed in any box — this is the single source of truth for
+    // duplicate detection in packing. (ProductionEntry is a separate table
+    // used elsewhere and is intentionally NOT checked here — see note below.)
     const alreadyPacked = await PackBoxItem.findOne({ serial });
     if (alreadyPacked) {
       return res.json({ success: false, message: 'Serial already packed' });
-    }
-
-    // Already in a production entry
-    const alreadyInProduction = await ProductionEntry.findOne({ serial });
-    if (alreadyInProduction) {
-      return res.json({ success: false, message: 'Serial already in production' });
     }
 
     // Model mismatch (only when model is extractable from serial)
