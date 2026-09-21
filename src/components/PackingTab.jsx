@@ -893,7 +893,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       const timer = setTimeout(() => {
         setShowPrintModal(false);
         setLastCompletedBox(null);
-      }, 8000);
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [showPrintModal, printError, unprintedBox, lastBoxId]);
@@ -1140,6 +1140,11 @@ const handleZPLTestPrint = async () => {
 
   const allModels = models.length > 0? models : Object.keys(MODEL_UPB_DEFAULTS).map(name => ({ name, customer: "ATOMBERG" }));
 
+  const activeRanges = Array.isArray(sRange) ? sRange : (sRange?.model ? [sRange] : []);
+  const activeModelNames = new Set(activeRanges.map(r => r.model));
+
+  const productionModels = allModels.filter(m => activeModelNames.has(m.name));
+
   const PrintModal = () => {
     if (!showPrintModal || !selectedModel) return null;
     const m = selectedModel;
@@ -1287,6 +1292,17 @@ const handleZPLTestPrint = async () => {
     );
   };
 
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (activeModelNames.size === 0) return; // no ranges configured yet, don't force-clear
+    if (!activeModelNames.has(selectedModel.name)) {
+      addLog("warn", `Production range for ${selectedModel.name} is no longer active. Deselecting.`);
+      setSelectedModel(null);
+      setCurrentSerials([]);
+      try { localStorage.removeItem(STORAGE_KEY_MODEL); } catch {}
+    }
+  }, [activeModelNames, selectedModel, addLog]);
+
   return (
     <>
       <style>{PACK_CSS}</style>
@@ -1332,8 +1348,19 @@ const handleZPLTestPrint = async () => {
         {activeSubTab === "scan" && (
           <div className="pk-grid">
             <div className="pk-sidebar">
-              <div className="pk-sidebar-title">Select Model</div>
-              {allModels.map((m, i) => {
+
+               <div className="pk-sidebar-title">Active Model</div>
+                {productionModels.length === 0 && (
+                  <div style={{
+                    fontSize: 12, color: "var(--g500)", background: "var(--g50)",
+                    border: "1px dashed var(--g200)", borderRadius: 8, padding: "14px 12px",
+                    textAlign: "center"
+                  }}>
+                    No model has an active serial range set.<br />
+                    Set a production range in Settings to begin scanning.
+                  </div>
+                )}
+              {productionModels.map((m, i) => {
                 const upb = getUpb(m.name);
                 const isSelected = selectedModel?.name === m.name;
                 const isLoading = isSelected && loadingOpenBox;
