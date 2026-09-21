@@ -1048,16 +1048,6 @@ const handleZPLTestPrint = async () => {
   }
 };
 
-  // const prevSerialInput = useRef("");
-  // useEffect(() => {
-  //   if (serialInput && serialInput !== prevSerialInput.current && serialInput.length >= 10) {
-  //     if (Object.values(DEMO_PREFIXES).some(p => serialInput.startsWith(p))) {
-  //       const timeout = setTimeout(() => addSerial(), 80);
-  //       return () => clearTimeout(timeout);
-  //     }
-  //   }
-  //   prevSerialInput.current = serialInput;
-  // }, [serialInput, addSerial]);
 
   const handleEditConfig = useCallback((model, upb, desc) => {
     setConfigModel(model);

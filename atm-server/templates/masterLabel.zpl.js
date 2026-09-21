@@ -160,20 +160,19 @@ export const generateMasterLabelZPL = ({
 
 
   // ============================================================
-  // 11. DYNAMIC LABEL HEIGHT
+  // 11. FIXED LABEL HEIGHT
   // ============================================================
+  // Label is a fixed 6" tall label.
+  // Printer resolution: 300 dots/inch
+  // 6in * 300dpi = 1800 dots
 
-  const BOTTOM_PADDING = 35;
+  const DOTS_PER_INCH = 300;
+  const LABEL_HEIGHT_INCHES = 6;
 
-  const labelHeight =
-    BARCODE_START_Y +
-    (cleanSerials.length * BARCODE_SLOT_HEIGHT) +
-    BOTTOM_PADDING;
+  const labelHeight = LABEL_HEIGHT_INCHES * DOTS_PER_INCH; // 1800
 
   const borderHeight =
     labelHeight - (BORDER_Y * 2);
-
-  const R = 25;
 
 
   // ============================================================
@@ -226,20 +225,11 @@ export const generateMasterLabelZPL = ({
 
 
 ^FX ============================================================
-^FX OUTER BORDER
+^FX OUTER BORDER (rounded corners)
 ^FX ============================================================
 
-^FO${BORDER_X + R},${BORDER_Y}
-^GB${BORDER_W - (R * 2)},3,3^FS
-
-^FO${BORDER_X + R},${BORDER_Y + borderHeight - 3}
-^GB${BORDER_W - (R * 2)},3,3^FS
-
-^FO${BORDER_X},${BORDER_Y + R}
-^GB3,${borderHeight - (R * 2)},3^FS
-
-^FO${BORDER_X + BORDER_W - 3},${BORDER_Y + R}
-^GB3,${borderHeight - (R * 2)},3^FS
+^FO${BORDER_X},${BORDER_Y}
+^GB${BORDER_W},${borderHeight},3,B,1^FS
 
 
 ^FX ============================================================
