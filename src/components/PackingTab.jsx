@@ -1009,6 +1009,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
 const handleZPLTestPrint = async () => {
   try {
+    const printerName = appSettings.printerName || "ZDesigner ZT231-300dpi ZPL";
 
     const testZPL = `
     ^XA
@@ -1036,13 +1037,15 @@ const handleZPLTestPrint = async () => {
     ^XZ
     `;
 
-      await qzService.printZPL(testZPL);
-      alert("✅ Test ZPL sent successfully!");
+    await qzService.printZPL(testZPL, printerName);
+    addLog("ok", `✅ Test ZPL sent to ${printerName}`);
+    alert(`✅ Test ZPL sent to ${printerName}!`);
 
-    } catch (error) {
-      console.error("❌ Test Print Error:", error);
-      alert(`❌ Print Failed:\n${error.message}`);
-    }
+  } catch (error) {
+    console.error("❌ Test Print Error:", error);
+    addLog("err", `❌ Test print failed: ${error.message}`);
+    alert(`❌ Print Failed:\n${error.message}`);
+  }
 };
 
   // const prevSerialInput = useRef("");
