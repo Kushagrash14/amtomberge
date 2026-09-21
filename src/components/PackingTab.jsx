@@ -675,7 +675,9 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
 
 
   // ─── Add serial validation ───────────────────────────────────────────────────
-   const addSerial = useCallback(async () => {
+  const addSerial = useCallback(async () => {
+    const t0 = performance.now();
+
     if (isScanningRef.current) {
       addLog("warn", `Scan "${serialInput.trim()}" ignored — previous scan still processing.`);
       return;
@@ -786,12 +788,34 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
         }
       }
 
+      // ── Timing checkpoint: all client-side validation is done, network call starts here ──
+      const tValidationDone = performance.now();
+      const clientValidationMs = +(tValidationDone - t0).toFixed(1);
+
       const res = await apiFetch("POST", "/pack/scan", {
         date: productionDate,
         model: m.name,
         serial,
         plant: check.parsed.plant,
         units_per_box: m.upb,
+      });
+
+      const networkMs = +(performance.now() - tValidationDone).toFixed(1);
+      const totalMs = +(performance.now() - t0).toFixed(1);
+      const serverMs = res?._timings?.total ?? null;
+
+      addLog(
+        "info",
+        `⏱ "${serial}" — validation: ${clientValidationMs}ms · network(+server): ${networkMs}ms` +
+          (serverMs !== null ? ` (server reported: ${serverMs}ms)` : "") +
+          ` · total: ${totalMs}ms`
+      );
+      console.log(`[addSerial timing] "${serial}"`, {
+        clientValidationMs,
+        networkMs,
+        serverReportedMs: serverMs,
+        serverBreakdown: res?._timings,
+        totalMs,
       });
 
       if (!res || res.success === false) {
@@ -860,6 +884,7 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     }
   }, [serialInput, selectedModel, addLog, productionDate, plantCode, apiFetch, sRange, currentSerials, history, lastCompletedBox, boxNumber, appSettings]);
 
+  
    useEffect(() => {
     if (!AUTO_SUBMIT_ON_LENGTH) return;
     if (serialInput.trim().length !== 16) return;
@@ -1157,6 +1182,7 @@ const handleZPLTestPrint = async () => {
     () => allModels.filter(m => activeModelNames.has(m.name)),
     [allModels, activeModelNames]
   );
+
   const PrintModal = () => {
     if (!showPrintModal || !selectedModel) return null;
     const m = selectedModel;

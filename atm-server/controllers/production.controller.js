@@ -569,6 +569,10 @@ const buildBoxCode = (model, boxNum) => {
 // POST /api/production/pack/scan
 // ─────────────────────────────────────────────────────────────
 export const savePackScan = async (req, res) => {
+  const t0 = performance.now();
+  const timings = {};
+  const mark = (label, from) => { timings[label] = +(performance.now() - from).toFixed(1); };
+
   try {
     const { date, model, serial } = req.body;
 
@@ -578,7 +582,10 @@ export const savePackScan = async (req, res) => {
 
 
     // ── 1. Load pack config (needed for upb + label fields) ──
+    let t = performance.now();
     const config = await PackConfig.findOne({ model });
+    mark('config_lookup', t);
+
     const unitsPerBox  = req.body.units_per_box ? Number(req.body.units_per_box) : (config?.units_per_box ?? 12);
     const description  = config?.description    ?? model;
     const size_inch    = config?.size_inch       ?? '';
@@ -586,17 +593,21 @@ export const savePackScan = async (req, res) => {
 
     // ── 2. Validations FIRST (BEFORE creating any new box) ────
 
-    // Already packed in any box — this is the single source of truth for
-    // duplicate detection in packing. (ProductionEntry is a separate table
-    // used elsewhere and is intentionally NOT checked here — see note below.)
+    t = performance.now();
     const alreadyPacked = await PackBoxItem.findOne({ serial });
+    mark('already_packed_check', t);
+
     if (alreadyPacked) {
+      mark('total', t0);
+      console.log(`[savePackScan] REJECTED (already packed) — timings:`, timings);
       return res.json({ success: false, message: 'Serial already packed' });
     }
 
-    // Model mismatch (only when model is extractable from serial)
+    // Model mismatch (only when model is extractable from serial) — no DB, cheap
     const scannedModel = extractModelFromSerial(serial);
     if (scannedModel && scannedModel !== model) {
+      mark('total', t0);
+      console.log(`[savePackScan] REJECTED (model mismatch) — timings:`, timings);
       return res.json({
         success: false,
         message: `Model mismatch: expected ${model}, found ${scannedModel}`,
@@ -604,10 +615,15 @@ export const savePackScan = async (req, res) => {
     }
 
     // Serial range check
+    t = performance.now();
     const range = await SerialRange.findOne({ date, model }).sort({ createdAt: -1 });
+    mark('range_lookup', t);
+
     if (range) {
       const num = extractSerialNum(serial);
       if (num !== null && (num < range.start || num > range.end)) {
+        mark('total', t0);
+        console.log(`[savePackScan] REJECTED (out of range) — timings:`, timings);
         return res.json({
           success: false,
           message: `Serial out of range: allowed ${range.start}–${range.end}`,
@@ -617,30 +633,41 @@ export const savePackScan = async (req, res) => {
 
 
     // ── 3. Find or create the current open box ───────────────
+    t = performance.now();
     let box = await PackBox.findOne({ date, model, status: 'open' })
       .sort({ box_number: -1 });
+    mark('open_box_lookup', t);
 
     if (box) {
       // Check if this open box is already full
+      t = performance.now();
       const existingItems = await PackBoxItem.find({ box_id: box.id });
+      mark('existing_items_lookup', t);
+
       if (existingItems.length >= box.units_per_box) {
         box.status = 'closed';
         box.packed_at = box.packed_at || new Date();
+        t = performance.now();
         await box.save();
+        mark('close_full_box_save', t);
         box = null; // force creation of the next box
       }
     }
 
     if (!box) {
+      t = performance.now();
       const pool = getPool();
       const [maxRows] = await pool.query(
         'SELECT COALESCE(MAX(box_number), 0) AS max_box FROM pack_boxes WHERE date = ? AND model = ?',
         [date, model]
       );
+      mark('max_box_number_query', t);
+
       const maxBoxNum = Number(maxRows[0]?.max_box || 0);
       const boxNum    = maxBoxNum + 1;
       const boxCode   = buildBoxCode(model, boxNum);
 
+      t = performance.now();
       box = await PackBox.create({
         date,
         model,
@@ -649,16 +676,23 @@ export const savePackScan = async (req, res) => {
         units_per_box: unitsPerBox,
         status:        'open',
       });
+      mark('new_box_create', t);
     } else if (req.body.units_per_box && box.units_per_box !== unitsPerBox) {
       box.units_per_box = unitsPerBox;
+      t = performance.now();
       await box.save();
+      mark('upb_update_save', t);
     }
 
 
     // ── 4. Save the scan ─────────────────────────────────────
+    t = performance.now();
     await PackBoxItem.create({ box_id: box.id, serial });
+    mark('item_create', t);
 
+    t = performance.now();
     const currentItems = await PackBoxItem.find({ box_id: box.id }).sort({ scanned_at: 1 });
+    mark('current_items_lookup', t);
 
 
     // ── 5. Close box + generate label when full ──────────────
@@ -669,8 +703,11 @@ export const savePackScan = async (req, res) => {
 
       box.status     = 'closed';
       box.master_qr  = serials.join(',');
+      t = performance.now();
       await box.save();
+      mark('close_box_save', t);
 
+      t = performance.now();
       const zpl = generateMasterLabelZPL({
         model,
         description,
@@ -679,6 +716,7 @@ export const savePackScan = async (req, res) => {
         boxCode:   box.box_code,
         serials,
       });
+      mark('zpl_generation', t);
 
       printData = {
         shouldPrint: true,
@@ -691,6 +729,9 @@ export const savePackScan = async (req, res) => {
 
 
     // ── 6. Respond ───────────────────────────────────────────
+    mark('total', t0);
+    console.log(`[savePackScan] OK "${serial}" — timings (ms):`, timings);
+
     return ok(res, {
       box_id:        box.id,           // included so frontend can mark-printed after QZ success
       box_number:    box.box_number,
@@ -700,10 +741,12 @@ export const savePackScan = async (req, res) => {
       status:        box.status,
       serials:       currentItems,
       print:         printData,
+      _timings:      timings,   // optional: strip this in production once you've diagnosed
     });
 
   } catch (e) {
-    console.error('savePackScan error:', e);
+    mark('total', t0);
+    console.error('savePackScan error:', e, 'timings so far:', timings);
     return err(res, 'Failed to save scan', 500);
   }
 };
