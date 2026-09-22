@@ -31,6 +31,7 @@ router.get("/login", async (req, res) => {
         }
 
         const user = await userModel.findOne({ email });
+
         if (!user) {
             return res.status(404).json({ message: "User not exist" });
         }
@@ -50,12 +51,14 @@ router.get("/login", async (req, res) => {
         console.error("Error during login:", error);
         return res.status(500).json({ message: "Internal server error" });
     }
+
 });
 
 
 router.get("/verify/otp", async (req, res) => {
   try {
     const email = normalizeEmail(req.query.email);
+    console.log("Verifying OTP for email:", email, "with query params:", req.query);
     const { otp } = req.query;
 
     if(!email || !otp) {
