@@ -18,40 +18,85 @@ const getToken = (user) => jwt.sign(
 );
 
 
-router.get("/login", async (req, res) => {
-    try {
-        const email = normalizeEmail(req.query.email);
+// router.post("/login", async (req, res) => {
+//   try {
+//     const email = normalizeEmail(req.body.email);
 
-        if(!email) {
-            return res.status(400).json({ message: "Email is required" });
-        }
+//     if (!email) {
+//       return res.status(400).json({ message: "Email is required" });
+//     }
 
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            return res.status(400).json({ message: "Invalid email format" });
-        }
+//     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+//       return res.status(400).json({ message: "Invalid email format" });
+//     }
 
-        const user = await userModel.findOne({ email });
+//     const user = await userModel.findOne({ email });
 
-        if (!user) {
-            return res.status(404).json({ message: "User not exist" });
-        }
+//     if (!user) {
+//       return res.status(404).json({ message: "User does not exist" });
+//     }
 
-        const otp = generateOTP();
-        const expireOtpAt = new Date(Date.now() + 10 * 60 * 1000); // OTP expires in 10 minutes
+//     const otp = generateOTP();
+//     user.otp = otp;
+//     user.expireOtpAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        user.otp = otp;
-        user.expireOtpAt = expireOtpAt;
-        await user.save();
+//     await user.save();
 
-        await sendOTPEmail(email, otp);
+//     await sendOTPEmail(email, otp);
 
-        return res.status(200).json({ message: "User exist", success: true });
+//     return res.status(200).json({
+//       message: "OTP sent successfully",
+//       success: true
+//     });
 
-    } catch (error) {
-        console.error("Error during login:", error);
-        return res.status(500).json({ message: error.message || "Internal server error" });
+//   } catch (error) {
+//     console.error("Error during login:", error);
+
+//     return res.status(500).json({
+//       message: error.message || "Internal server error"
+//     });
+//   }
+// });
+
+
+router.post("/login", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ message: "User does not exist" });
+    }
+
+    // OTP fields are no longer used — clear any leftovers from the old flow
+    user.otp = undefined;
+    user.expireOtpAt = undefined;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Login successful",
+      success: true,
+      token: getToken(user),
+      name: user.name || user.username || user.email,
+      role: user.role || "user",
+    });
+
+  } catch (error) {
+    console.error("Error during login:", error);
+
+    return res.status(500).json({
+      message: error.message || "Internal server error"
+    });
+  }
 });
 
 

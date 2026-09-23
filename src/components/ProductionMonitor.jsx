@@ -422,13 +422,7 @@ const LOGIN_CSS = `
   .lg-err{background:#fee2e2;color:#991b1b;border:1px solid #ef4444}
   .lg-ok{background:#d1fae5;color:#065f46;border:1px solid #10b981}
   .lg-info{background:#fef3f8;color:#9b1939;border:1px solid #f0adc2}
-  .lg-otp-row{display:flex;gap:6px;justify-content:center;margin:12px 0}
-  .lg-otp-inp{width:46px;text-align:center;font-size:22px;font-weight:800;padding:8px 0;border-radius:8px;border:2px solid #e5e7eb;font-family:'Inter',sans-serif;outline:none;transition:.2s}
-  .lg-otp-inp:focus{border-color:#C41E4E;box-shadow:0 0 0 3px rgba(196,30,78,.1)}
-  .lg-timer{text-align:center;color:#6b7280;font-size:11px;margin-top:6px}
-  .lg-ebox{background:#fef3f8;padding:9px 12px;border-radius:7px;font-size:12px;color:#374151;margin-bottom:12px;border:1px solid #f0adc2;word-break:break-all}
   .lg-foot{text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid #f0f0f0;color:#9ca3af;font-size:10px}
-  .lg-row2{display:flex;gap:8px;margin-top:8px}
   .lg-loading{text-align:center;padding:24px}
   .lg-spin{display:inline-block;width:32px;height:32px;border:3px solid #f0f0f0;border-top-color:#C41E4E;border-radius:50%;animation:lgspin .8s linear infinite}
   .lg-loading p{margin-top:12px;color:#374151;font-weight:600;font-size:13px}
@@ -442,15 +436,11 @@ const LOGIN_CSS = `
     .lg-hr{margin-bottom:14px}
     .lg-fg{margin-bottom:10px}
     .lg-al{margin-bottom:10px;padding:8px 10px}
-    .lg-otp-row{margin:8px 0}
-    .lg-foot{margin-top:12px;padding-top:10px}
     .lg-loading{padding:16px}
   }
   @media (max-width:480px){
     .lg-body{padding:12px}
     .lg-card{padding:28px 22px}
-    .lg-otp-row{gap:5px}
-    .lg-otp-inp{width:40px;font-size:20px}
   }
 `;
 
@@ -485,100 +475,57 @@ export default function App() {
 }
 
 // ─── Login page ───────────────────────────────────────────────────────────────
+// NOTE: OTP step removed. Login is now email-only — if the email is a
+// registered user, the backend must respond immediately with a token.
+// POST /auth/login now expects to return { success, token, name, role }
+// directly (no OTP dispatch) instead of sending an OTP.
 function LoginPage({ onLogin }) {
-  const [step,    setStep]    = useState(1);
   const [email,   setEmail]   = useState("");
-  const [otp,     setOtp]     = useState(["","","","","",""]);
   const [loading, setLoading] = useState(false);
   const [loadTxt, setLoadTxt] = useState("");
-  const [err1,    setErr1]    = useState("");
-  const [err2,    setErr2]    = useState("");
-  const [otpMsg,  setOtpMsg]  = useState("");
-  const [timer,   setTimer]   = useState(600);
-  const timerRef = useRef(null);
-  const otpRefs  = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
+  const [err,     setErr]     = useState("");
 
-  const startTimer = () => {
-    setTimer(600);
-    clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setTimer(t => { if (t <= 1) { clearInterval(timerRef.current); return 0; } return t - 1; });
-    }, 1000);
-  };
-  useEffect(() => () => clearInterval(timerRef.current), []);
-  const timerStr = `${String(Math.floor(timer / 60)).padStart(2,"0")}:${String(timer % 60).padStart(2,"0")}`;
-
-  // FIX 6: All auth URLs now consistently use the configured auth API prefix
-  const sendOTP = async () => {
+  const doLogin = async () => {
     const v = email.trim();
-    if (!v || !v.includes("@")) { setErr1("Please enter a valid email address."); return; }
-    setErr1(""); setLoading(true); setLoadTxt(`Sending OTP to ${v}...`);
-    
-    try {
-      const res  = await fetch(`${API_BASE}/auth/login?email=${encodeURIComponent(v)}`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setOtpMsg(data.message || "OTP sent to your email!");
-        setStep(2); startTimer();
-        setTimeout(() => { otpRefs[0].current?.focus(); }, 300);
-      } else { setErr1(data.message || "Failed to send OTP. Check if your email is registered."); }
-    } catch (error) { 
-      console.error("Error sending OTP:", error?.res?.data || error.message || error);
-      setErr1("Network error — could not reach server."); }
-    finally { 
-      setLoading(false); 
-      setLoadTxt(""); 
+
+    if (!v || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      setErr("Please enter a valid email address.");
+      return;
     }
 
-  };
+    setErr("");
+    setLoading(true);
+    setLoadTxt(`Logging in as ${v}...`);
 
-  const verify = async () => {
-    const otpVal = otp.join("");
-    if (otpVal.length !== 6) { setErr2("Please enter all 6 digits."); return; }
-    setErr2(""); setLoading(true); setLoadTxt("Verifying OTP...");
     try {
-      const res  = await fetch(`${API_BASE}/auth/verify/otp?email=${encodeURIComponent(email.trim())}&otp=${encodeURIComponent(otpVal)}`);
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: v }),
+      });
+
       const data = await res.json();
+
       if (res.ok && data.success) {
-        clearInterval(timerRef.current);
         setLoadTxt("Login successful! Loading dashboard...");
         setTimeout(() => {
-          onLogin({ token: data.token, name: data.name || email, role: data.role || "user", email: email.trim().toLowerCase() });
-        }, 700);
+          onLogin({ token: data.token, name: data.name || v, role: data.role || "user", email: v.toLowerCase() });
+        }, 500);
       } else {
-        setErr2(data.message || "Incorrect OTP. Please try again.");
-        setLoading(false); setLoadTxt("");
+        setErr(
+          data.message || "Login failed. Check if your email is registered."
+        );
+        setLoading(false);
+        setLoadTxt("");
       }
-    } catch { setErr2("Network error — could not reach server."); setLoading(false); setLoadTxt(""); }
-  };
-
-  const resend = async () => {
-    clearInterval(timerRef.current); setErr2("");
-    setLoading(true); setLoadTxt("Resending OTP...");
-    try {
-      const res  = await fetch(`${API_BASE}/auth/login?email=${encodeURIComponent(email.trim())}`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setOtpMsg("New OTP sent!"); setOtp(["","","","","",""]);
-        startTimer(); setTimeout(() => { otpRefs[0].current?.focus(); }, 200);
-      } else { setErr2(data.message || "Resend failed."); }
-    } catch { setErr2("Network error — could not reach server."); }
-    finally { setLoading(false); setLoadTxt(""); }
-  };
-
-  const handleOtpInput = (i, val) => {
-    const clean = val.replace(/[^0-9]/g, "").slice(-1);
-    const n = [...otp]; n[i] = clean; setOtp(n);
-    if (clean && i < 5) setTimeout(() => { otpRefs[i+1].current?.focus(); }, 0);
-    if (i === 5 && clean && [...n].join("").length === 6) setTimeout(verify, 100);
-  };
-  const handleOtpKey   = (i, e) => { if (e.key === "Backspace" && !otp[i] && i > 0) otpRefs[i-1].current?.focus(); };
-  const handleOtpPaste = (e) => {
-    e.preventDefault();
-    const t = (e.clipboardData || window.clipboardData).getData("text").replace(/[^0-9]/g,"").slice(0,6).split("");
-    const n = ["","","","","",""]; t.forEach((c, i) => { n[i] = c; }); setOtp(n);
-    if (t.length === 6) setTimeout(verify, 100);
-    else otpRefs[Math.min(t.length, 5)].current?.focus();
+    } catch (error) {
+      console.error("Error logging in:", error);
+      setErr("Network error — could not reach server.");
+      setLoading(false);
+      setLoadTxt("");
+    }
   };
 
   const card = (
@@ -588,7 +535,7 @@ function LoginPage({ onLogin }) {
           alt="PG Logo" />
       </div>
       <div className="lg-brand">PG GROUP</div>
-      <div className="lg-sub">Production Monitor — Secure Login</div>
+      <div className="lg-sub">Production Monitor — Login</div>
       <hr className="lg-hr" />
       {loading && (
         <div className="lg-loading">
@@ -596,42 +543,18 @@ function LoginPage({ onLogin }) {
           <p>{loadTxt || "Please wait..."}</p>
         </div>
       )}
-      {!loading && step === 1 && (
+      {!loading && (
         <div>
-          <div className="lg-al lg-info">Enter your registered email to receive a one-time password (OTP).</div>
+          <div className="lg-al lg-info">Enter your registered email to continue.</div>
           <div className="lg-fg">
             <label className="lg-lbl">Email Address</label>
             <input className="lg-inp" type="email" placeholder="you@company.com" value={email}
               onChange={e => setEmail(e.target.value)}
-              onKeyPress={e => { if (e.key === "Enter") sendOTP(); }}
+              onKeyPress={e => { if (e.key === "Enter") doLogin(); }}
               autoComplete="email" />
           </div>
-          {err1 && <div className="lg-al lg-err">{err1}</div>}
-          <button className="lg-btn" onClick={sendOTP}>Send OTP →</button>
-        </div>
-      )}
-      {!loading && step === 2 && (
-        <div>
-          <div className="lg-al lg-ok">{otpMsg || "OTP sent!"}</div>
-          <div className="lg-ebox">{email}</div>
-          <div className="lg-fg">
-            <label className="lg-lbl">Enter 6-Digit OTP</label>
-            <div className="lg-otp-row" onPaste={handleOtpPaste}>
-              {otp.map((v, i) => (
-                <input key={i} ref={otpRefs[i]} className="lg-otp-inp" type="text" maxLength="1"
-                  inputMode="numeric" value={v}
-                  onChange={e => handleOtpInput(i, e.target.value)}
-                  onKeyDown={e => handleOtpKey(i, e)} />
-              ))}
-            </div>
-            <div className="lg-timer">Expires in <b style={{ color:"#C41E4E" }}>{timerStr}</b></div>
-          </div>
-          {err2 && <div className="lg-al lg-err">{err2}</div>}
-          <button className="lg-btn" onClick={verify}>Verify &amp; Login</button>
-          <div className="lg-row2">
-            <button className="lg-ghost" onClick={() => { setStep(1); setOtp(["","","","","",""]); clearInterval(timerRef.current); }}>← Change Email</button>
-            <button className="lg-ghost" onClick={resend}>Resend OTP</button>
-          </div>
+          {err && <div className="lg-al lg-err">{err}</div>}
+          <button className="lg-btn" onClick={doLogin}>Login →</button>
         </div>
       )}
       <div className="lg-foot">PG GROUP © 2025 — Production Monitor v2.4</div>
