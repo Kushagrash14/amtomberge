@@ -49,7 +49,7 @@ router.get("/login", async (req, res) => {
 
     } catch (error) {
         console.error("Error during login:", error);
-        return res.status(500).json({ message: "Internal server error" });
+        return res.status(500).json({ message: error.message || "Internal server error" });
     }
 
 });
@@ -121,7 +121,9 @@ router.post("/register", async (req, res) => {
 
 })
 
+
 router.post("/logout", (req, res) => {
     return res.status(200).json({ message: "Logged out successfully", success: true });
 });
+
 export default router;

@@ -456,9 +456,6 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     setVlog(prev => [{ type, msg, time: nowStr() }, ...prev].slice(0, 60));
   }, []);
 
-
-  const AUTO_SUBMIT_ON_LENGTH = true;   // scanners with no Enter/Tab suffix
-
  
 
   // ─── Load history from API ──────────────────────────────────────────────────
@@ -884,13 +881,6 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     }
   }, [serialInput, selectedModel, addLog, productionDate, plantCode, apiFetch, sRange, currentSerials, history, lastCompletedBox, boxNumber, appSettings]);
 
-  
-   useEffect(() => {
-    if (!AUTO_SUBMIT_ON_LENGTH) return;
-    if (serialInput.trim().length !== 16) return;
-    const t = setTimeout(() => addSerial(), 60);   // let the last keystroke settle
-    return () => clearTimeout(t);
-  }, [serialInput, addSerial]);
 
 
   // ─── Remove serial from current box ─────────────────────────────────────────

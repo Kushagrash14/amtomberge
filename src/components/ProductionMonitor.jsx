@@ -249,10 +249,12 @@ function parseSerialDate(serial) {
   if (!possibleDates || !month) return null;
   return { possibleDates, month, year: 2000 + parseInt(m[3]), year2: parseInt(m[3]) };
 }
+
 function getTodayIST() {
   const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   return { date: ist.getDate(), month: ist.getMonth() + 1, year: ist.getFullYear(), year2: ist.getFullYear() % 100 };
 }
+
 function checkSerialDateStatus(serial) {
   const parsed = parseSerialDate(serial);
   if (!parsed) return "today";
@@ -267,6 +269,7 @@ function checkSerialDateStatus(serial) {
   if (allFuture) return "future";
   return "today";
 }
+
 function decodeSerialDateLabel(serial) {
   const parsed = parseSerialDate(serial);
   if (!parsed) return "";
@@ -510,6 +513,7 @@ function LoginPage({ onLogin }) {
     const v = email.trim();
     if (!v || !v.includes("@")) { setErr1("Please enter a valid email address."); return; }
     setErr1(""); setLoading(true); setLoadTxt(`Sending OTP to ${v}...`);
+    
     try {
       const res  = await fetch(`${API_BASE}/auth/login?email=${encodeURIComponent(v)}`);
       const data = await res.json();
@@ -518,8 +522,14 @@ function LoginPage({ onLogin }) {
         setStep(2); startTimer();
         setTimeout(() => { otpRefs[0].current?.focus(); }, 300);
       } else { setErr1(data.message || "Failed to send OTP. Check if your email is registered."); }
-    } catch { setErr1("Network error — could not reach server."); }
-    finally { setLoading(false); setLoadTxt(""); }
+    } catch (error) { 
+      console.error("Error sending OTP:", error?.res?.data || error.message || error);
+      setErr1("Network error — could not reach server."); }
+    finally { 
+      setLoading(false); 
+      setLoadTxt(""); 
+    }
+
   };
 
   const verify = async () => {
