@@ -2,7 +2,19 @@ import { ensureSchema, getPool } from '../config/sql.config.js';
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
-const toDbValue = (value) => (value === undefined ? null : value);
+const toDbValue = (value) => {
+  if (value === undefined) return null;
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 19).replace('T', ' ');
+    }
+  }
+  return value;
+};
 
 const toPlain = (value) => {
   if (Array.isArray(value)) return value.map(toPlain);

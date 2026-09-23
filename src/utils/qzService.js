@@ -22,11 +22,9 @@ const getApiUrl = (path) => {
 qz.security.setCertificatePromise(async () => {
   try {
     const url = getApiUrl('/qz/certificate');
-    console.log(`🔐 QZ Security: Fetching certificate from ${url}`);
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     const certificate = await response.text();
-    console.log("✅ QZ Security: Certificate loaded successfully", certificate);
     return certificate;
   } catch (error) {
     console.error("❌ QZ Security: Certificate Error:", error);
@@ -41,7 +39,6 @@ qz.security.setSignatureAlgorithm("SHA512");
 qz.security.setSignaturePromise(async (toSign) => {
   try {
     const url = getApiUrl('/qz/sign');
-    console.log(`✍️ QZ Security: Requesting signature from ${url}`);
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -54,7 +51,6 @@ qz.security.setSignaturePromise(async (toSign) => {
 
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     const signature = await response.text();
-    console.log("✅ QZ Security: Signature received successfully", response);
     return signature;
   } catch (error) {
     console.error("❌ QZ Security: Signature Error:", error);
@@ -69,9 +65,7 @@ export const qzService = {
   async connect() {
     try {
       if (!qz.websocket.isActive()) {
-        console.log('QZ Tray: Connecting to websocket...');
         await qz.websocket.connect();
-        console.log('QZ Tray: Connected successfully.');
       }
       return true;
     } catch (error) {
@@ -93,7 +87,6 @@ export const qzService = {
         value: 'QZ Tray Test Print\\nAtomberg Tracking System\\nConnectivity: OK\\n\\n\\n'
       }];
       await qz.print(config, data);
-      console.log('QZ Tray: Test print sent.');
       return true;
     } catch (error) {
       console.error('QZ Tray Print Error:', error);
@@ -126,7 +119,6 @@ export const qzService = {
     try {
       await this.connect();
       const printers = await qz.printers.find();
-      console.log("🖨️ Available Printers:", printers);
       return printers;
     } catch (error) {
       console.error("QZ Tray Printer Detection Error:", error);
@@ -137,7 +129,6 @@ export const qzService = {
   async printZPL(zpl, printerName = "ZDesigner ZT231-300dpi ZPL") {
     try {
       await this.connect();
-      console.log("🖨️ Preparing ZPL print...");
       const config = qz.configs.create(printerName);
       const data = [
         {
@@ -148,7 +139,6 @@ export const qzService = {
         },
       ];
       await qz.print(config, data);
-      console.log("✅ ZPL successfully sent to printer!");
       return true;
     } catch (error) {
       console.error("🔴 ZPL Print Error:", error);

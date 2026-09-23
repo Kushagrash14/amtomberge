@@ -1,8 +1,11 @@
 /**
  * generateMasterLabelZPL
  *
- * Zebra ZT231 - 203 DPI
+ * Zebra ZT231 - 300 DPI
  * Master Box Label
+ *
+ * Label Size: 3.8" wide × 7.5" tall
+ * @ 300 DPI = 1140 dots wide × 2250 dots tall
  *
  * Layout:
  * ┌──────────────────────────────────────────────┐
@@ -16,11 +19,11 @@
  * ├──────────────────────────────────────────────┤
  * │ Scanned Numbers :                            │
  * │                                              │
- * │        BARCODE                                │
- * │        SERIAL                                 │
+ * │        BARCODE                               │
+ * │        SERIAL                                │
  * │                                              │
- * │        BARCODE                                │
- * │        SERIAL                                 │
+ * │        BARCODE                               │
+ * │        SERIAL                                │
  * │                                              │
  * └──────────────────────────────────────────────┘
  */
@@ -51,10 +54,7 @@ export const generateMasterLabelZPL = ({
   // 2. PRINT DATE
   // ============================================================
 
-  const printDate = printedOn
-    ? printedOn
-    : new Date()
-        .toLocaleString("en-GB", {
+  const printDate = printedOn? printedOn : new Date().toLocaleString("en-GB", {
           day: "2-digit",
           month: "2-digit",
           year: "numeric",
@@ -62,121 +62,111 @@ export const generateMasterLabelZPL = ({
           minute: "2-digit",
           hour12: false,
         })
-        .replace(",",            "   ");
+        .replace(",", "   ");
 
 
   // ============================================================
   // 3. QR DATA
   // ============================================================
 
-  const qrData = [
-    `BOX:${boxCode}`,
-    `MODEL:${model}`,
-    `BOXNO:${boxNumber}`,
-    `QTY:${cleanSerials.length}`,
-    `SERIALS:${cleanSerials.join(",")}`,
-  ].join("|");
+  const getQrMagnification = (serialCount) => {
+  if (serialCount <= 2)  return 6;
+  if (serialCount <= 4)  return 5;
+  if (serialCount <= 6)  return 5;
+  if (serialCount <= 9)  return 4;
+  return 2;
+};
+
+// const QR_MAG = getQrMagnification(cleanSerials.length);
+
+  const qrData = cleanSerials.join("");
 
 
   // ============================================================
   // 4. LABEL DIMENSIONS
   // ============================================================
+  // Label:  3.8" wide × 7.5" tall  @  300 DPI
+  // Width:  3.8 × 300 = 1140 dots
+  // Height: 7.5 × 300 = 2250 dots
 
-  const PW = 900;
+  const DOTS_PER_INCH   = 300;
+  const LABEL_WIDTH_IN  = 3.8;
+  const LABEL_HEIGHT_IN = 7.5;
 
-  // Outer border
-  const BORDER_X = 25;
-  const BORDER_Y = 35;
-  const BORDER_W = 850;
+  const PW          = Math.round(LABEL_WIDTH_IN  * DOTS_PER_INCH); // 1140
+  const labelHeight = Math.round(LABEL_HEIGHT_IN * DOTS_PER_INCH); // 2250
+
+  // Outer border — 30 dot inset on all sides
+  const BORDER_X   = 30;
+  const BORDER_Y   = 120;
+  const BORDER_W   = PW - (BORDER_X * 2);         // 1080
+  const borderHeight = labelHeight - (BORDER_Y * 2); // 2170
+
+  // Inner content left/right margin
+  const L    = 100;          // left text start
+  const R    = PW - 60;     // right text end
+  const FB_W = R - L;       // ~1025 — field-block width for centred text
+
 
   // ============================================================
-  // 5. HEADER
+  // 5. HEADER  (top section — model / size / description)
   // ============================================================
 
-  const MODEL_Y = 65;
-  const SIZE_Y = 125;
-  const DESCRIPTION_Y = 170;
+  const MODEL_Y       = 150;   // "MODEL :"  label
+  const SIZE_Y        = 240;  // "Size/Color:"
+  const DESCRIPTION_Y = 320;  // description text (up to 2 lines, ~40px each → ends ~268)
 
 
   // ============================================================
-  // 6. QR
+  // 6. QR CODE
   // ============================================================
 
-  // Keep QR comfortably between description and Printed On.
-  const QR_MAG = 4;
+  // QR_MAG = 3 keeps the code compact (each module = 3 dots).
+  // With typical data (~180 chars) this renders at version ~9-10:
+  //   ~53 modules × 4 = ~212 dots square — comfortably small.
+  const QR_MAG = getQrMagnification(cleanSerials.length);
 
-  // ^BQN automatically determines actual QR dimensions
-  // based on data density. Do NOT calculate QR_SIZE manually.
-
-  const QR_X = 350;
-  const QR_Y = 150;
+  // Right-aligned so it doesn't overlap left-side text
+  const QR_X = 480;
+  const QR_Y = 280;
+  // QR bottom ≈ 175 + 175 = 350  (conservative upper-bound for version 10)
 
 
   // ============================================================
   // 7. PRINT DATE
   // ============================================================
 
-  const PRINTED_LABEL_Y = 440;
-  const PRINTED_VALUE_X = 265;
+  const PRINTED_LABEL_Y = 570;
+  const PRINTED_VALUE_X = 420;  // right-aligned to QR code (430 + 150 = 580)
 
-
-  // ============================================================
-  // 8. DIVIDER
-  // ============================================================
-
-  const DIVIDER_Y = 485;
 
 
   // ============================================================
   // 9. SCANNED NUMBERS TITLE
   // ============================================================
 
-  const SCANNED_TITLE_Y = 505;
+  const SCANNED_TITLE_Y = 700;
 
 
   // ============================================================
   // 10. BARCODE SETTINGS
   // ============================================================
 
-  const BARCODE_START_Y = 555;
+  const BARCODE_START_Y = 800;  // first barcode top edge
+  const BARCODE_HEIGHT  = 100;   // bar height in dots
 
-  // Desired reference:
-  // wide barcode + serial number below it
+  const BAR_TO_TEXT_GAP = 10;    // space between bottom of bars and serial text
+  const TEXT_HEIGHT     = 35;   // matches ^A0N,28,28 below
+  const SLOT_BOTTOM_GAP = 19;
 
-  const BARCODE_HEIGHT = 80;
+  const BARCODE_TEXT_Y_OFFSET = BARCODE_HEIGHT + BAR_TO_TEXT_GAP;
+  const BARCODE_SLOT_HEIGHT   = BARCODE_TEXT_Y_OFFSET + TEXT_HEIGHT + SLOT_BOTTOM_GAP;
 
-  // Space occupied by each serial:
-  //
-  // barcode       80
-  // gap             8
-  // serial text    30
-  // bottom gap     35
-  //
-  // total ≈ 153
 
-  const BARCODE_SLOT_HEIGHT = 145;
-
-  const BARCODE_TEXT_Y_OFFSET = 85;
 
 
   // ============================================================
-  // 11. FIXED LABEL HEIGHT
-  // ============================================================
-  // Label is a fixed 6" tall label.
-  // Printer resolution: 300 dots/inch
-  // 6in * 300dpi = 1800 dots
-
-  const DOTS_PER_INCH = 300;
-  const LABEL_HEIGHT_INCHES = 6;
-
-  const labelHeight = LABEL_HEIGHT_INCHES * DOTS_PER_INCH; // 1800
-
-  const borderHeight =
-    labelHeight - (BORDER_Y * 2);
-
-
-  // ============================================================
-  // 12. GENERATE SERIAL BARCODE BLOCKS
+  // 11. GENERATE SERIAL BARCODE BLOCKS
   // ============================================================
 
   let serialBarcodes = "";
@@ -191,125 +181,116 @@ export const generateMasterLabelZPL = ({
       barcodeY +
       BARCODE_TEXT_Y_OFFSET;
 
+      serialBarcodes += `
+      ^FO150,${barcodeY}
+      ^BY4,3,${BARCODE_HEIGHT}
+      ^BCN,${BARCODE_HEIGHT},N,N,N
+      ^FD${serial}^FS
 
-    serialBarcodes += `
-^FO128,${barcodeY}
-^BY3,3,${BARCODE_HEIGHT}
-^BCN,${BARCODE_HEIGHT},N,N,N
-^FD${serial}^FS
-
-^FO50,${textY}
-^A0N,30,30
-^FB800,1,0,C
-^FD${serial}^FS
-`;
+      ^FO${L},${textY}
+      ^A0N,38,38
+      ^FB${FB_W},1,0,C
+      ^FD${serial}^FS
+      `;
   });
 
 
   // ============================================================
-  // 13. FINAL ZPL
+  // 12. FINAL ZPL
   // ============================================================
 
   return `
-^XA
+    ^XA
 
-^CI28
+    ^CI28
 
-^PW${PW}
-^LL${labelHeight}
+    ^PW${PW}
+    ^LL${labelHeight}
 
-^LH0,0
+    ^LH0,0
 
-^MMT
-^MNY
-
-
-^FX ============================================================
-^FX OUTER BORDER (rounded corners)
-^FX ============================================================
-
-^FO${BORDER_X},${BORDER_Y}
-^GB${BORDER_W},${borderHeight},3,B,1^FS
+    ^MMT
+    ^MNY
 
 
-^FX ============================================================
-^FX MODEL
-^FX ============================================================
+    ^FX ============================================================
+    ^FX OUTER BORDER
+    ^FX ============================================================
 
-^FO50,${MODEL_Y}
-^A0N,36,36
-^FDMODEL :^FS
-
-^FO285,${MODEL_Y}
-^A0N,38,38
-^FD${model}^FS
+    ^FO${BORDER_X},${BORDER_Y}
+    ^GB${BORDER_W},${borderHeight},3,B,1^FS
 
 
-^FX ============================================================
-^FX SIZE / COLOR
-^FX ============================================================
+    ^FX ============================================================
+    ^FX MODEL
+    ^FX ============================================================
 
-^FO50,${SIZE_Y}
-^A0N,32,32
-^FDSize/Color:^FS
+    ^FO${L + 150},${MODEL_Y}
+    ^A0N,60,60
+    ^FDMODEL :^FS
 
-
-^FX ============================================================
-^FX DESCRIPTION
-^FX ============================================================
-
-^FO50,${DESCRIPTION_Y}
-^A0N,38,38
-^FB800,2,0,L
-^FD${(description || "").toUpperCase()} ${size_inch ? size_inch.toUpperCase() : ""}^FS
+    ^FO${L+470},${MODEL_Y}
+    ^A0N,60,60
+    ^FD${model}^FS
 
 
-^FX ============================================================
-^FX QR CODE
-^FX ============================================================
+    ^FX ============================================================
+    ^FX SIZE / COLOR
+    ^FX ============================================================
 
-^FO${QR_X},${QR_Y}
-^BQN,2,${QR_MAG}
-^FDLA,${qrData}^FS
-
-
-^FX ============================================================
-^FX PRINTED ON
-^FX ============================================================
-
-^FO50,${PRINTED_LABEL_Y}
-^A0N,32,32
-^FDPrinted On :^FS
-
-^FO${PRINTED_VALUE_X},${PRINTED_LABEL_Y}
-^A0N,32,32
-^FD${printDate}^FS
+    ^FO${L},${SIZE_Y}
+    ^A0N,60,60
+    ^FDSize/Color:^FS
 
 
-^FX ============================================================
-^FX DIVIDER
-^FX ============================================================
+    ^FX ============================================================
+    ^FX DESCRIPTION
+    ^FX ============================================================
 
-^FO25,${DIVIDER_Y}
-^GB850,2,2^FS
-
-
-^FX ============================================================
-^FX SCANNED NUMBERS
-^FX ============================================================
-
-^FO50,${SCANNED_TITLE_Y}
-^A0N,36,36
-^FDScanned Numbers :^FS
+    ^FO${L},${DESCRIPTION_Y}
+    ^A0N,60,60
+    ^FB${FB_W},2,0,L
+    ^FD${(description || "").toUpperCase()} ${size_inch ? size_inch.toUpperCase() : ""}^FS
 
 
-^FX ============================================================
-^FX SERIAL BARCODES
-^FX ============================================================
+    ^FX ============================================================
+    ^FX QR CODE
+    ^FX ============================================================
 
-${serialBarcodes}
+    ^FO${QR_X},${QR_Y}
+    ^BQN,5,${QR_MAG}
+    ^FDLA,${qrData}^FS
 
 
-^XZ
-`.trim();
+    ^FX ============================================================
+    ^FX PRINTED ON
+    ^FX ============================================================
+
+    ^FO${L},${PRINTED_LABEL_Y}
+    ^A0N,60,60
+    ^FDPrinted On :^FS
+
+    ^FO${PRINTED_VALUE_X},${PRINTED_LABEL_Y}
+    ^A0N,60,60
+    ^FD${printDate}^FS
+
+
+    ^FX ============================================================
+    ^FX SCANNED NUMBERS
+    ^FX ============================================================
+
+    ^FO${L},${SCANNED_TITLE_Y}
+    ^A0N,60,60
+    ^FDScanned Numbers :^FS
+
+
+    ^FX ============================================================
+    ^FX SERIAL BARCODES
+    ^FX ============================================================
+
+    ${serialBarcodes}
+
+
+    ^XZ
+  `.trim();
 };

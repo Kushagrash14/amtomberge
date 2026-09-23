@@ -12,7 +12,6 @@ const err = (res, msg, status = 400) => res.status(status).json({ success: false
 
 // DIAGNOSTIC FUNCTION: Run raw SQL to verify connectivity and data
 const runDbDiagnostics = async () => {
-  console.log('\n--- [DB DIAGNOSTICS START] ---');
   try {
     const pool = getPool();
     const results = {};
@@ -32,17 +31,10 @@ const runDbDiagnostics = async () => {
       results[key] = rows[0];
     }
 
-    console.log('Database:', results.db_name?.name);
-    console.log('Host:', results.host?.host);
-    console.log('User:', results.user?.user);
-    console.log('Total pack_boxes:', results.total_boxes?.count);
-    console.log('Count for 2026-09-09:', results.date_check?.count);
-    console.log('Count for 09-06 to 09-09:', results.range_check?.count);
-    console.log('Table Definition:', results.table_def);
+
   } catch (e) {
     console.error('Diagnostics failed:', e);
   }
-  console.log('--- [DB DIAGNOSTICS END] ---\n');
 };
 
 // Run diagnostics immediately on module load
@@ -529,7 +521,7 @@ export const getPackBoxes = async (req, res) => {
     }
     if (model) filter.model = model;
 
-    const boxes = await PackBox.find(filter).sort({ box_number: 1 });
+    const boxes = await PackBox.find(filter).sort({ date: -1, box_number: -1 });
 
     const boxesWithItems = await Promise.all(boxes.map(async (b) => {
       const items = await PackBoxItem.find({ box_id: b.id }).sort({ scanned_at: 1 });
@@ -547,6 +539,8 @@ export const getPackBoxes = async (req, res) => {
     err(res, 'Failed to load boxes', 500);
   }
 };
+
+
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
@@ -580,51 +574,41 @@ export const savePackScan = async (req, res) => {
       return err(res, 'date, model, serial required');
     }
 
-
-    // ── 1. Load config + run the independent pre-write checks CONCURRENTLY ──
-    // config, alreadyPacked, and range don't depend on each other's results,
-    // so there's no reason to pay a full round trip for each one in series.
-    // Measured: each round trip costs ~210ms regardless of what it queries —
-    // that's fixed network latency to the DB, not query execution time — so
-    // running 3 of them concurrently turns ~630ms into ~210ms.
+    // ── 1. Run independent pre-write checks & open box lookup CONCURRENTLY ──
     const tParallel = performance.now();
-    const [config, alreadyPacked, range] = await Promise.all([
+    const [config, alreadyPacked, range, existingOpenBox] = await Promise.all([
       PackConfig.findOne({ model }),
       PackBoxItem.findOne({ serial }),
       SerialRange.findOne({ date, model }).sort({ createdAt: -1 }),
+      PackBox.findOne({ date, model, status: 'open' }).sort({ box_number: -1 }),
     ]);
-    mark('parallel_config_dup_range', tParallel);
+    mark('parallel_pre_checks', tParallel);
 
     const unitsPerBox  = req.body.units_per_box ? Number(req.body.units_per_box) : (config?.units_per_box ?? 12);
     const description  = config?.description    ?? model;
     const size_inch    = config?.size_inch       ?? '';
 
-
-    // ── 2. Validations (results already fetched above, no extra DB calls) ──
-
+    // ── 2. Validations (results already in memory) ──
     if (alreadyPacked) {
       mark('total', t0);
-      console.log(`[savePackScan] REJECTED (already packed) — timings:`, timings);
       return res.json({ success: false, message: 'Serial already packed' });
     }
 
-    // Model mismatch (only when model is extractable from serial) — no DB, cheap
+    // Model mismatch (only when model is extractable from serial)
     const scannedModel = extractModelFromSerial(serial);
     if (scannedModel && scannedModel !== model) {
       mark('total', t0);
-      console.log(`[savePackScan] REJECTED (model mismatch) — timings:`, timings);
       return res.json({
         success: false,
         message: `Model mismatch: expected ${model}, found ${scannedModel}`,
       });
     }
 
-    // Serial range check (range already fetched above)
+    // Serial range check
     if (range) {
       const num = extractSerialNum(serial);
       if (num !== null && (num < range.start || num > range.end)) {
         mark('total', t0);
-        console.log(`[savePackScan] REJECTED (out of range) — timings:`, timings);
         return res.json({
           success: false,
           message: `Serial out of range: allowed ${range.start}–${range.end}`,
@@ -632,18 +616,14 @@ export const savePackScan = async (req, res) => {
       }
     }
 
-
     // ── 3. Find or create the current open box ───────────────
-    // (Genuinely sequential from here — each step's outcome decides the next.)
-    let t = performance.now();
-    let box = await PackBox.findOne({ date, model, status: 'open' })
-      .sort({ box_number: -1 });
-    mark('open_box_lookup', t);
+    let box = existingOpenBox;
+    
+    let existingItems = [];
 
     if (box) {
-      // Check if this open box is already full
-      t = performance.now();
-      const existingItems = await PackBoxItem.find({ box_id: box.id });
+      let t = performance.now();
+      existingItems = await PackBoxItem.find({ box_id: box.id }).sort({ scanned_at: 1 });
       mark('existing_items_lookup', t);
 
       if (existingItems.length >= box.units_per_box) {
@@ -653,11 +633,12 @@ export const savePackScan = async (req, res) => {
         await box.save();
         mark('close_full_box_save', t);
         box = null; // force creation of the next box
+        existingItems = [];
       }
     }
 
     if (!box) {
-      t = performance.now();
+      let t = performance.now();
       const pool = getPool();
       const [maxRows] = await pool.query(
         'SELECT COALESCE(MAX(box_number), 0) AS max_box FROM pack_boxes WHERE date = ? AND model = ?',
@@ -681,21 +662,19 @@ export const savePackScan = async (req, res) => {
       mark('new_box_create', t);
     } else if (req.body.units_per_box && box.units_per_box !== unitsPerBox) {
       box.units_per_box = unitsPerBox;
-      t = performance.now();
+      let t = performance.now();
       await box.save();
       mark('upb_update_save', t);
     }
 
-
     // ── 4. Save the scan ─────────────────────────────────────
-    t = performance.now();
-    await PackBoxItem.create({ box_id: box.id, serial });
+    let t = performance.now();
+    const nowIso = new Date().toISOString();
+    const newItem = await PackBoxItem.create({ box_id: box.id, serial, scanned_at: nowIso });
     mark('item_create', t);
 
-    t = performance.now();
-    const currentItems = await PackBoxItem.find({ box_id: box.id }).sort({ scanned_at: 1 });
-    mark('current_items_lookup', t);
-
+    // Efficiently combine in memory without a redundant second find() query
+    const currentItems = [...existingItems, newItem];
 
     // ── 5. Close box + generate label when full ──────────────
     let printData = null;
@@ -729,13 +708,11 @@ export const savePackScan = async (req, res) => {
       };
     }
 
-
     // ── 6. Respond ───────────────────────────────────────────
     mark('total', t0);
-    console.log(`[savePackScan] OK "${serial}" — timings (ms):`, timings);
 
     return ok(res, {
-      box_id:        box.id,           // included so frontend can mark-printed after QZ success
+      box_id:        box.id,
       box_number:    box.box_number,
       box_code:      box.box_code,
       item_count:    currentItems.length,
@@ -743,7 +720,14 @@ export const savePackScan = async (req, res) => {
       status:        box.status,
       serials:       currentItems,
       print:         printData,
-      _timings:      timings,   // optional: strip once you've confirmed the improvement
+      lastScanned: {
+        id:         newItem.id,
+        serial:     newItem.serial,
+        box_number: box.box_number,
+        scanned_at: nowIso,
+      },
+      config_upb:    unitsPerBox,
+      _timings:      timings,
     });
 
   } catch (e) {
@@ -799,8 +783,7 @@ export const savePackBox = async (req, res) => {
 
 // GET /api/production/pack/open-box?model=X&date=YYYY-MM-DD
 // Returns the currently open box for a given model (if any), with its scanned items.
-// Also returns the most recent closed-but-unprinted box so the frontend can show a
-// "reprint required" warning and regenerate the label without re-completing the box.
+// Also returns the most recent closed-but-unprinted box and the last scanned serial overall.
 export const getOpenBox = async (req, res) => {
   try {
     const { model, date } = req.query;
@@ -811,9 +794,29 @@ export const getOpenBox = async (req, res) => {
     const config = await PackConfig.findOne({ model });
     const description = config?.description ?? model;
     const size_inch   = config?.size_inch   ?? '';
+    const config_upb  = config?.units_per_box ?? null;
+
+    // ── 0. Fetch the last scanned item for this model overall (from any box) ──
+    const pool = getPool();
+    let lastScanned = null;
+    try {
+      const [lastRows] = await pool.query(
+        `SELECT i.id, i.serial, i.scanned_at, b.box_number, b.status AS box_status
+         FROM pack_box_items i
+         JOIN pack_boxes b ON i.box_id = b.id
+         WHERE b.model = ?
+         ORDER BY i.id DESC
+         LIMIT 1`,
+        [model]
+      );
+      if (lastRows && lastRows.length > 0) {
+        lastScanned = lastRows[0];
+      }
+    } catch (errLast) {
+      console.error('Error fetching lastScanned item:', errLast);
+    }
 
     // ── 1. Check for a closed-but-unprinted box (status === 'closed') ──
-    // Once printed, status transitions to 'printed', so already-printed boxes will never be returned here.
     const unprintedBox = await PackBox.findOne({ date: today, model, status: 'closed' })
       .sort({ box_number: -1 });
 
@@ -841,14 +844,18 @@ export const getOpenBox = async (req, res) => {
       };
     }
 
-    // ── 2. Find the most recently open box for this model today ──
-    const openBox = await PackBox.findOne({ date: today, model, status: 'open' })
+    // ── 2. Find the open box for this model (check today, fall back to any open box for model) ──
+    let openBox = await PackBox.findOne({ date: today, model, status: 'open' })
       .sort({ box_number: -1 });
+    if (!openBox) {
+      openBox = await PackBox.findOne({ model, status: 'open' })
+        .sort({ box_number: -1 });
+    }
 
     if (openBox) {
       // Sync units_per_box with current config if it changed
-      if (config?.units_per_box && openBox.units_per_box !== config.units_per_box) {
-        openBox.units_per_box = config.units_per_box;
+      if (config_upb && openBox.units_per_box !== config_upb) {
+        openBox.units_per_box = config_upb;
         await openBox.save();
       }
 
@@ -856,10 +863,7 @@ export const getOpenBox = async (req, res) => {
       const items = await PackBoxItem.find({ box_id: openBox.id })
         .sort({ scanned_at: 1 });
 
-      // ── If box is already full (items reached upb), auto-close it server-side ──
-      // This handles race conditions (UPB changed, prior crash, etc.). The box is
-      // promoted to closedUnprintedBox so the amber banner shows and the user prints
-      // before starting the next box.
+      // If box is already full, auto-close it
       if (items.length > 0 && items.length >= openBox.units_per_box) {
         const serials = items.map(i => i.serial);
         openBox.status    = 'closed';
@@ -874,7 +878,6 @@ export const getOpenBox = async (req, res) => {
           serials,
         });
 
-        // Merge with any pre-existing closedUnprintedBoxData — keep whichever is newer
         const boxData = {
           id:            openBox.id,
           box_number:    openBox.box_number,
@@ -891,10 +894,16 @@ export const getOpenBox = async (req, res) => {
           openBox: null,
           closedUnprintedBox: boxData,
           nextBoxNumber: lastBox2 ? lastBox2.box_number + 1 : openBox.box_number + 1,
+          lastScanned: lastScanned || (items.length > 0 ? { serial: items[items.length - 1].serial, box_number: openBox.box_number, scanned_at: items[items.length - 1].scanned_at } : null),
+          config_upb,
         });
       }
 
-      // ── Partial open box — return as-is for the user to continue scanning ──
+      // ── Partial open box — return with items and lastScanned ──
+      const boxLastScanned = items.length > 0
+        ? { serial: items[items.length - 1].serial, box_number: openBox.box_number, scanned_at: items[items.length - 1].scanned_at }
+        : lastScanned;
+
       return ok(res, {
         openBox: {
           id:            openBox.id,
@@ -905,10 +914,12 @@ export const getOpenBox = async (req, res) => {
           date:          openBox.date,
           model:         openBox.model,
           serials:       items,
-          zpl:           null,  // not full yet — no ZPL needed
+          zpl:           null,
         },
         closedUnprintedBox: closedUnprintedBoxData,
         nextBoxNumber: openBox.box_number,
+        lastScanned: boxLastScanned,
+        config_upb,
       });
     }
 
@@ -920,6 +931,8 @@ export const getOpenBox = async (req, res) => {
       openBox: null,
       closedUnprintedBox: closedUnprintedBoxData,
       nextBoxNumber: lastBox ? lastBox.box_number + 1 : 1,
+      lastScanned,
+      config_upb,
     });
 
   } catch (e) {
