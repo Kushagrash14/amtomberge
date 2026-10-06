@@ -804,10 +804,10 @@ export const getOpenBox = async (req, res) => {
         `SELECT i.id, i.serial, i.scanned_at, b.box_number, b.status AS box_status
          FROM pack_box_items i
          JOIN pack_boxes b ON i.box_id = b.id
-         WHERE b.model = ?
+         WHERE b.model = ? AND b.date = ?
          ORDER BY i.id DESC
          LIMIT 1`,
-        [model]
+        [model, today]
       );
       if (lastRows && lastRows.length > 0) {
         lastScanned = lastRows[0];

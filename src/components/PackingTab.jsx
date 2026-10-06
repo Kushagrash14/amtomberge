@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useRef, useCallback, useMemo  } from "react";
+import ExcelJS from "exceljs";
 import { qzService } from "../utils/qzService";
 
 
@@ -596,10 +597,8 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
           try { localStorage.setItem(STORAGE_KEY_MODEL, JSON.stringify(refreshed)); } catch {}
         }
 
-        // Always sync last scanned item for this model
-        if (res.lastScanned) {
-          setLastScanned(res.lastScanned);
-        }
+        // Sync last scanned item for today (or reset to null if none packed today)
+          setLastScanned(res.lastScanned || null);
 
         if (res.openBox) {
           // ── Case A: Partial open box — resume scanning ──
@@ -1344,10 +1343,186 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
   }, [apiFetch, appSettings, addLog, todayStr]);
 
 
-  // Add near your other history state
-const [refreshingHistory, setRefreshingHistory] = useState(false);
+// Add near your other history state
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
 
-const refreshCurrentHistory = useCallback(async () => {
+  const handleDownloadHistory = useCallback(async () => {
+    if (!filteredHistory || filteredHistory.length === 0) {
+      alert("No box history data to download.");
+      return;
+    }
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Atomberg Production System";
+      wb.lastModifiedBy = "Packing Station";
+      wb.created = new Date();
+      wb.modified = new Date();
+
+      const ws = wb.addWorksheet("Box History", {
+        views: [{ state: "frozen", ySplit: 1, showGridLines: true }],
+        properties: { defaultRowHeight: 22 }
+      });
+
+      // 1. Exact Column Definitions and Sensible Widths
+      ws.columns = [
+        { header: "S.No.",          key: "sno",         width: 8 },
+        { header: "Date",           key: "date",        width: 14 },
+        { header: "Box #",          key: "boxNum",      width: 10 },
+        { header: "Box Code",       key: "boxCode",     width: 25 },
+        { header: "Model",          key: "model",       width: 14 },
+        { header: "Units Packed",   key: "unitsPacked", width: 15 },
+        { header: "Units Per Box",  key: "upb",         width: 15 },
+        { header: "Status",         key: "status",      width: 20 },
+        { header: "Serial Numbers", key: "serials",     width: 80 }
+      ];
+
+      // 2. Premium Header Row Styling (Dark Navy #172554, Bold White Text)
+      const headerRow = ws.getRow(1);
+      headerRow.height = 28;
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF172554" }
+        };
+        cell.font = {
+          name: "Segoe UI",
+          size: 11,
+          bold: true,
+          color: { argb: "FFFFFFFF" }
+        };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "center",
+          wrapText: true
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FF1E3A8A" } },
+          left: { style: "thin", color: { argb: "FF1E3A8A" } },
+          bottom: { style: "medium", color: { argb: "FF1E3A8A" } },
+          right: { style: "thin", color: { argb: "FF1E3A8A" } }
+        };
+      });
+
+      // Helper to format date into DD/MM/YYYY
+      const formatDateDDMMYYYY = (isoOrDate) => {
+        if (!isoOrDate) return "";
+        try {
+          const d = new Date(isoOrDate);
+          if (isNaN(d.getTime())) return String(isoOrDate);
+          const day = String(d.getDate()).padStart(2, "0");
+          const month = String(d.getMonth() + 1).padStart(2, "0");
+          const year = d.getFullYear();
+          return `${day}/${month}/${year}`;
+        } catch {
+          return String(isoOrDate);
+        }
+      };
+
+      // 3. Populate Data Rows with Zebra Shading and Status Highlighting
+      filteredHistory.forEach((b, idx) => {
+        const serialsList = (b.serials || [])
+          .map(s => (typeof s === "object" ? s.serial : s))
+          .filter(Boolean)
+          .join(", ");
+
+        const dateStr = formatDateDDMMYYYY(b.timestamp);
+
+        const row = ws.addRow({
+          sno: idx + 1,
+          date: dateStr,
+          boxNum: b.boxNum,
+          boxCode: b.boxCode || "N/A",
+          model: b.model,
+          unitsPacked: b.serials?.length || 0,
+          upb: b.upb,
+          status: b.status,
+          serials: serialsList
+        });
+
+        const isOdd = (idx + 1) % 2 === 1;
+        const bgArgb = isOdd ? "FFFFFFFF" : "FFF8FAFC"; // Subtle zebra row shading
+
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: bgArgb }
+          };
+          cell.font = {
+            name: "Segoe UI",
+            size: 10,
+            color: { argb: "FF1E293B" }
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE2E8F0" } },
+            left: { style: "thin", color: { argb: "FFE2E8F0" } },
+            bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+            right: { style: "thin", color: { argb: "FFE2E8F0" } }
+          };
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+
+          // Specific column formatting
+          if (colNumber === 1) { // S.No.
+            cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF64748B" } };
+          } else if (colNumber === 3) { // Box #
+            cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF0F172A" } };
+          } else if (colNumber === 4) { // Box Code
+            cell.font = { name: "Consolas", size: 10, bold: true, color: { argb: "FF0F172A" } };
+          } else if (colNumber === 5) { // Model
+            cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF2563EB" } };
+          } else if (colNumber === 8) { // Status Badge Color
+            const st = String(b.status || "");
+            if (st.toLowerCase().includes("printed") && !st.toLowerCase().includes("unprinted")) {
+              cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+              cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF166534" } };
+            } else if (st.toLowerCase().includes("unprinted") || st.toLowerCase().includes("closed")) {
+              cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF3C7" } };
+              cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF92400E" } };
+            } else {
+              cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+              cell.font = { name: "Segoe UI", size: 10, bold: true, color: { argb: "FF1E40AF" } };
+            }
+          } else if (colNumber === 9) { // Serial Numbers
+            cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+            cell.font = { name: "Consolas", size: 9.5, color: { argb: "FF334155" } };
+          }
+        });
+      });
+
+      // 4. Set AutoFilter on the Header Row
+      ws.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: 9 }
+      };
+
+      // 5. Generate Excel Buffer & Trigger Native Browser Download
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+
+      const dateTag = historyDateFilter === "custom" && customDateRange.start
+        ? `${customDateRange.start}_to_${customDateRange.end || customDateRange.start}`
+        : historyDateFilter;
+      const modelTag = historyModelFilter !== "all" ? `_${historyModelFilter}` : "_All";
+      const todayTag = new Date().toISOString().slice(0, 10);
+      const filename = `Box_History${modelTag}_${dateTag}_${todayTag}.xlsx`;
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("Export to Excel failed:", err);
+      alert("Failed to export Excel report: " + (err.message || err));
+    }
+  }, [filteredHistory, historyDateFilter, historyModelFilter, customDateRange]);
+
+  const refreshCurrentHistory = useCallback(async () => {
   setRefreshingHistory(true);
   try {
     // re-run the same date-range logic the useEffect uses
@@ -1791,11 +1966,20 @@ useEffect(() => {
                   <option value="30days">Last 30 Days</option>
                   <option value="custom">Custom Range</option>
                 </select>
-              </div>
-              <button className="btn btn-navy" style={{ padding: "6px 12px", fontSize: 11 }} onClick={refreshCurrentHistory} disabled={refreshingHistory}>
-                {refreshingHistory ? "⏳ Refreshing…" : "🔄 Refresh"}
-              </button>
-              {historyDateFilter === "custom" && (
+                </div>
+                <button
+                  className="btn btn-navy"
+                  style={{ padding: "6px 12px", fontSize: 11 }}
+                  onClick={handleDownloadHistory}
+                  disabled={filteredHistory.length === 0}
+                  title="Download filtered box history to Excel (.xlsx)"
+                >
+                  📥 Download
+                </button>
+                <button className="btn btn-navy" style={{ padding: "6px 12px", fontSize: 11 }} onClick={refreshCurrentHistory} disabled={refreshingHistory}>
+                  {refreshingHistory ? "⏳ Refreshing…" : "🔄 Refresh"}
+                </button>
+                {historyDateFilter === "custom" && (
                 <div className="pk-filter-group">
                   <input type="date" className="pk-date-input" value={customDateRange.start} onChange={e => setCustomDateRange(prev => ({ ...prev, start: e.target.value }))} />
                   <span>to</span>
@@ -1808,6 +1992,7 @@ useEffect(() => {
               <table className="pk-history-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 50 }}>S.No.</th>
                     <th>Box #</th>
                     <th>Box Code</th>
                     <th>Model</th>
@@ -1820,6 +2005,7 @@ useEffect(() => {
                   {filteredHistory.length > 0 ? (
                     filteredHistory.map((b, i) => (
                       <tr key={i} style={{ cursor: "pointer" }} onClick={() => setSelectedHistoryBox(b)}>
+                        <td style={{ color: "var(--g500)", fontWeight: 600, fontSize: 12 }}>{i + 1}</td>
                         <td><strong>#{b.boxNum}</strong></td>
                         <td><code style={{ fontSize: 12, fontWeight: 700 }}>{b.boxCode}</code></td>
                         <td>{b.model}</td>
@@ -1848,7 +2034,7 @@ useEffect(() => {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="6" style={{ textAlign: "center", padding: "20px", color: "var(--g400)", fontSize: 13 }}>
+                      <td colSpan="7" style={{ textAlign: "center", padding: "20px", color: "var(--g400)", fontSize: 13 }}>
                         No completed boxes found for the selected filters.
                       </td>
                     </tr>
