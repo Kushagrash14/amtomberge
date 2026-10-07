@@ -54,16 +54,15 @@ export const generateMasterLabelZPL = ({
   // 2. PRINT DATE
   // ============================================================
 
-  const printDate = printedOn? printedOn : new Date().toLocaleString("en-GB", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-        .replace(",", "   ");
-
+  const printDate = printedOn ? printedOn : new Date().toLocaleString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).replace(",", "   ");
 
   // ============================================================
   // 3. QR DATA
