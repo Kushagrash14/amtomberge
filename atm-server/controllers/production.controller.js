@@ -683,6 +683,7 @@ export const savePackScan = async (req, res) => {
       const serials = currentItems.map((i) => i.serial);
 
       box.status     = 'closed';
+      box.packed_at  = nowIso;
       box.master_qr  = serials.join(',');
       t = performance.now();
       await box.save();

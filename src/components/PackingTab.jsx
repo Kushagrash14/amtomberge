@@ -309,23 +309,37 @@ function nowStr() {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
 }
 
-function formatDateInd(dateStr) {
-  if (!dateStr) return "N/A";
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
+  function formatDateInd(dateStr) {
+    if (!dateStr) return "N/A";
 
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const raw = String(dateStr).trim();
 
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  const dayName = days[d.getDay()];
+    // Normalize to UTC ISO string
+    // Handles: "2026-10-07 03:13:27" | "2026-10-07T03:13:27" | "2026-10-07T03:13:27Z" | "2026-10-07T03:13:27+05:30"
+    const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+    const isoStr = hasTimezone
+      ? raw.replace(" ", "T")
+      : raw.replace(" ", "T") + "Z";
 
-  return `${dd}/${mm}/${yyyy} : ${hh}:${min}:${ss} : ${dayName}`;
-}
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return dateStr;
+
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      weekday: "short",
+    }).formatToParts(d);
+
+    const get = (type) => parts.find((p) => p.type === type)?.value || "00";
+
+    return `${get("day")}/${get("month")}/${get("year")} : ${get("hour")}:${get("minute")}:${get("second")} : ${get("weekday")}`;
+  }
 
 // // ─── Helper: extract model code from serial (positions 4-10) ─────────────────
 // function extractPackModel(serial) {

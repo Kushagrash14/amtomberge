@@ -45,6 +45,7 @@ const createPool = () => {
     waitForConnections: true,
     connectionLimit: Number(process.env.SQL_CONNECTION_LIMIT || 5),
     queueLimit: 0,
+    timezone: 'Z',
     ssl: sslRequired ? { ca, rejectUnauthorized: Boolean(ca) } : undefined,
   });
 };
