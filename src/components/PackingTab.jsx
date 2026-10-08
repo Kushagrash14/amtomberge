@@ -1009,16 +1009,30 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
     addSerial(gen);
   }, [selectedModel, productionDate, plantCode, addSerial]);
 
-  // ─── Auto-close print modal after 8s only on SUCCESS (keep open if error) ──
+  // ─── Auto-close print modal after 1s only on SUCCESS ───────────────────────
+
   useEffect(() => {
+
     const hasIssue = !!printError || (unprintedBox && unprintedBox.id === lastBoxId);
+
     if (showPrintModal && !hasIssue) {
+
       const timer = setTimeout(() => {
+
         setShowPrintModal(false);
+
         setLastCompletedBox(null);
+
+        // Restore scanner input focus for the next box
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 50);
+
       }, 1000);
+
       return () => clearTimeout(timer);
     }
+
   }, [showPrintModal, printError, unprintedBox, lastBoxId]);
 
   // ─── Manual / reprint ───────────────────────────────────────────────────────
@@ -1248,6 +1262,10 @@ export default function PackingTab({ models = [], apiFetch, todayStr, sRange, ap
       setShowPrintModal(false);
       setLastCompletedBox(null);
       setPrintError(null);
+
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
     };
 
     return (
