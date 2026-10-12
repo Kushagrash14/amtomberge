@@ -991,13 +991,45 @@ export const manualPrintBox = async (req, res) => {
     const description = config?.description ?? box.model;
     const size_inch   = config?.size_inch   ?? '';
 
+    // Preserve the original box completion timestamp during reprints.
+    let printedOn;
+
+    if (box.packed_at) {
+      const raw = box.packed_at instanceof Date
+        ? box.packed_at.toISOString()
+        : String(box.packed_at).trim();
+
+      // MySQL DATETIME has no timezone; interpret it as UTC.
+      const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+      const isoString = hasTimezone
+        ? raw.replace(' ', 'T')
+        : raw.replace(' ', 'T') + 'Z';
+
+      const packedDate = new Date(isoString);
+
+      if (!Number.isNaN(packedDate.getTime())) {
+        printedOn = packedDate.toLocaleString('en-GB', {
+          timeZone: 'Asia/Kolkata',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).replace(',', '   ');
+      }
+    }
+
+    console.log('[REPRINT FORMATTED TIME]', printedOn);
+
     const zpl = generateMasterLabelZPL({
       model: box.model,
       description,
       size_inch,
       boxNumber: box.box_number,
-      boxCode:   box.box_code,
+      boxCode: box.box_code,
       serials,
+      printedOn,
     });
 
     return ok(res, {
@@ -1014,6 +1046,7 @@ export const manualPrintBox = async (req, res) => {
     err(res, 'Failed to prepare box for manual printing: ' + e.message, 500);
   }
 };
+
 
 // POST /api/production/pack/boxes/:id/printed
 // Called by the frontend after QZ Tray successfully sends the label to the physical printer.
