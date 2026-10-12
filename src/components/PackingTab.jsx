@@ -168,6 +168,63 @@ const PACK_CSS = `
   .pk-detail-title { font-size: 18px; font-weight: 800; color: var(--g900); margin-bottom: 4px; }
   .pk-detail-sub { font-size: 12px; color: var(--g600); margin-bottom: 20px; border-bottom: 1px solid var(--g200); padding-bottom: 12px; }
   .pk-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+
+    /* ─── Pack Config Password Modal (Ant Design Style) ─── */
+  .pk-auth-modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+    z-index: 1200; align-items: center; justify-content: center;
+    backdrop-filter: blur(2px);
+  }
+  .pk-auth-modal-overlay.visible { display: flex; }
+  .pk-auth-modal {
+    background: #fff; border-radius: 8px; width: 420px; max-width: 92%;
+    box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+  }
+  .pk-auth-header {
+    padding: 16px 24px; border-bottom: 1px solid #f0f0f0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .pk-auth-title { font-size: 16px; font-weight: 600; color: rgba(0, 0, 0, 0.88); }
+  .pk-auth-close {
+    border: none; background: transparent; font-size: 16px; color: rgba(0, 0, 0, 0.45);
+    cursor: pointer; line-height: 1; padding: 4px; border-radius: 4px; transition: .15s;
+  }
+  .pk-auth-close:hover { color: rgba(0, 0, 0, 0.88); background: rgba(0, 0, 0, 0.06); }
+  .pk-auth-body { padding: 20px 24px; }
+  .pk-auth-desc { font-size: 14px; color: rgba(0, 0, 0, 0.65); margin-bottom: 16px; line-height: 1.5; }
+  .pk-auth-input-wrap { position: relative; margin-bottom: 8px; }
+  .pk-auth-input {
+    width: 100%; height: 36px; padding: 6px 36px 6px 11px; font-size: 14px;
+    border: 1px solid #d9d9d9; border-radius: 6px; outline: none; transition: all 0.2s;
+    box-sizing: border-box; color: rgba(0, 0, 0, 0.88);
+  }
+  .pk-auth-input:focus { border-color: #1677ff; box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1); }
+  .pk-auth-input.error { border-color: #ff4d4f; }
+  .pk-auth-eye-btn {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: transparent; border: none; cursor: pointer; color: rgba(0, 0, 0, 0.45);
+    font-size: 14px; padding: 4px; line-height: 1;
+  }
+  .pk-auth-eye-btn:hover { color: rgba(0, 0, 0, 0.75); }
+  .pk-auth-err-msg { font-size: 12px; color: #ff4d4f; margin-top: 4px; min-height: 18px; }
+  .pk-auth-footer {
+    padding: 12px 24px; border-top: 1px solid #f0f0f0;
+    display: flex; justify-content: flex-end; gap: 8px; background: #fafafa;
+  }
+  .pk-auth-btn-cancel {
+    height: 32px; padding: 4px 15px; border-radius: 6px; font-size: 14px;
+    border: 1px solid #d9d9d9; background: #fff; color: rgba(0, 0, 0, 0.88);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .pk-auth-btn-cancel:hover { border-color: #4096ff; color: #4096ff; }
+  .pk-auth-btn-unlock {
+    height: 32px; padding: 4px 15px; border-radius: 6px; font-size: 14px;
+    border: 1px solid #1677ff; background: #1677ff; color: #fff;
+    cursor: pointer; font-weight: 500; transition: all 0.2s;
+  }
+  .pk-auth-btn-unlock:hover { background: #4096ff; border-color: #4096ff; }
+
   .pk-detail-item { display: flex; flex-direction: column; gap: 2px; }
   .pk-detail-label { font-size: 11px; font-weight: 700; color: var(--g500); text-transform: uppercase; }
   .pk-detail-value { font-size: 13px; font-weight: 600; color: var(--navy); }
@@ -398,9 +455,55 @@ const STORAGE_KEY_MODEL = "packing_selected_model";
 const STORAGE_KEY_CONFIG = "packing_config_cache";
 
 export default function PackingTab({ models = [], apiFetch, todayStr, sRange, appSettings = {} }) {
-  // ─── Sub-tab state ──────────────────────────────────────────────────────────
-  const [activeSubTab, setActiveSubTab] = useState("scan"); // "scan" | "history" | "config"
+    
+// ─── Sub-tab state ──────────────────────────────────────────────────────────
+    const [activeSubTab, setActiveSubTab] = useState("scan"); // "scan" | "history" | "config"
 
+    // ─── Pack Config Authentication State ──────────────────────────────────────
+    const [showConfigAuthModal, setShowConfigAuthModal] = useState(false);
+    const [configPassword, setConfigPassword] = useState("");
+    const [showConfigPassword, setShowConfigPassword] = useState(false);
+    const [configAuthError, setConfigAuthError] = useState("");
+    const passwordInputRef = useRef(null);
+
+    const handleSubTabClick = (tabId) => {
+      if (tabId === "config") {
+        // If already on config, do nothing
+        if (activeSubTab === "config") return;
+        // Prevent multiple modal triggers
+        if (showConfigAuthModal) return;
+        
+        setConfigPassword("");
+        setConfigAuthError("");
+        setShowConfigPassword(false);
+        setShowConfigAuthModal(true);
+        setTimeout(() => passwordInputRef.current?.focus(), 100);
+        return;
+      }
+      setActiveSubTab(tabId);
+    };
+
+    const handleCloseConfigAuth = () => {
+      setShowConfigAuthModal(false);
+      setConfigPassword("");
+      setConfigAuthError("");
+      setShowConfigPassword(false);
+    };
+
+    const handleUnlockConfig = (e) => {
+      if (e) e.preventDefault();
+      if (configPassword === "admin2024") {
+        setShowConfigAuthModal(false);
+        setConfigPassword("");
+        setConfigAuthError("");
+        setShowConfigPassword(false);
+        setActiveSubTab("config");
+      } else {
+        setConfigAuthError("Incorrect password. Please try again.");
+        setConfigPassword("");
+        passwordInputRef.current?.focus();
+      }
+    };
   // ─── Model & packing state ──────────────────────────────────────────────────
   // Restore last selected model from localStorage on first mount
   const [selectedModel, setSelectedModel] = useState(() => {
@@ -1672,6 +1775,53 @@ useEffect(() => {
       <PrintModal />
       <BoxDetailModal />
 
+      {/* ─── Pack Config Password Modal ─── */}
+      {showConfigAuthModal && (
+        <div className="pk-auth-modal-overlay visible" onClick={handleCloseConfigAuth}>
+          <div className="pk-auth-modal" onClick={e => e.stopPropagation()}>
+            <div className="pk-auth-header">
+              <div className="pk-auth-title">Pack Config Authentication</div>
+              <button type="button" className="pk-auth-close" onClick={handleCloseConfigAuth} title="Close">✕</button>
+            </div>
+            <form onSubmit={handleUnlockConfig}>
+              <div className="pk-auth-body">
+                <div className="pk-auth-desc">Enter the password to access packing configuration.</div>
+                <div className="pk-auth-input-wrap">
+                  <input
+                    ref={passwordInputRef}
+                    type={showConfigPassword ? "text" : "password"}
+                    className={`pk-auth-input${configAuthError ? " error" : ""}`}
+                    placeholder="Enter password"
+                    value={configPassword}
+                    onChange={e => {
+                      setConfigPassword(e.target.value);
+                      if (configAuthError) setConfigAuthError("");
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="pk-auth-eye-btn"
+                    onClick={() => setShowConfigPassword(p => !p)}
+                    title={showConfigPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfigPassword ? "👁️" : "👁️‍🗨️"}
+                  </button>
+                </div>
+                <div className="pk-auth-err-msg">{configAuthError}</div>
+              </div>
+              <div className="pk-auth-footer">
+                <button type="button" className="pk-auth-btn-cancel" onClick={handleCloseConfigAuth}>
+                  Cancel
+                </button>
+                <button type="submit" className="pk-auth-btn-unlock">
+                  Unlock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="pk-wrap">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div className="pk-tabs">
@@ -1680,7 +1830,7 @@ useEffect(() => {
               { id: "history", label: `📋 Box History (${history.length})` },
               { id: "config", label: "⚙️ Pack Config" },
             ].map(t => (
-              <button key={t.id} className={`pk-tab-btn${activeSubTab === t.id ? " active" : ""}`} onClick={() => setActiveSubTab(t.id)}>
+              <button key={t.id} className={`pk-tab-btn${activeSubTab === t.id ? " active" : ""}`} onClick={() => handleSubTabClick(t.id)}>
                 {t.label}
               </button>
             ))}
