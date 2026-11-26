@@ -59,6 +59,8 @@ const getToken = (user) => jwt.sign(
 // });
 
 
+const LOGIN_PASSCODE = String(process.env.LOGIN_OTP || '222222').trim();
+
 router.post("/login", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
@@ -77,17 +79,10 @@ router.post("/login", async (req, res) => {
       return res.status(404).json({ message: "User does not exist" });
     }
 
-    // OTP fields are no longer used — clear any leftovers from the old flow
-    user.otp = undefined;
-    user.expireOtpAt = undefined;
-    await user.save();
-
     return res.status(200).json({
-      message: "Login successful",
+      message: "OTP sent to your email!",
       success: true,
-      token: getToken(user),
-      name: user.name || user.username || user.email,
-      role: user.role || "user",
+      requiresOtp: true,
     });
 
   } catch (error) {
@@ -100,27 +95,22 @@ router.post("/login", async (req, res) => {
 });
 
 
-router.get("/verify/otp", async (req, res) => {
+const handleVerifyOtp = async (req, res) => {
   try {
-    const email = normalizeEmail(req.query.email);
-    console.log("Verifying OTP for email:", email, "with query params:", req.query);
-    const { otp } = req.query;
+    const email = normalizeEmail(req.body?.email ?? req.query?.email);
+    const otp = String(req.body?.otp ?? req.query?.otp ?? '').trim();
 
-    if(!email || !otp) {
-      return res.status(400).json({ message: "Email and OTP are required" });
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP are required" });
     }
 
     const user = await userModel.findOne({ email });
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    if (user.otp !== otp) {
-      return res.status(400).json({ message: "Invalid OTP" });
-    }
-
-    if (new Date() > user.expireOtpAt) {
-      return res.status(400).json({ message: "OTP has expired" });
+    if (otp !== LOGIN_PASSCODE) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
     }
 
     user.otp = undefined;
@@ -136,9 +126,12 @@ router.get("/verify/otp", async (req, res) => {
     });
   } catch (error) {
     console.error("Error during OTP verification:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
-});
+};
+
+router.post("/verify/otp", handleVerifyOtp);
+router.get("/verify/otp", handleVerifyOtp);
 
 
 router.post("/register", async (req, res) => {
