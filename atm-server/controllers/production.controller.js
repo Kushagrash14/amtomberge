@@ -1070,6 +1070,180 @@ export const markBoxPrinted = async (req, res) => {
   }
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION TREND
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/production/trend?days=7
+// Returns daily production counts for the last N days (7, 15, or 30).
+// Dates are stored as DD-MM-YYYY strings in production_entries.
+// We generate the date list in JS (IST) and do a single COUNT(*) GROUP BY query.
+export const getProductionTrend = async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+    const pool = getPool();
+
+    // Build the list of dates in YYYY-MM-DD format (en-CA locale, IST timezone)
+    // — this matches how the frontend's todayStr() stores dates in production_entries.
+    const fmtYYYYMMDD = (d) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
+    const today = new Date();
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      dateList.push(fmtYYYYMMDD(d));
+    }
+
+    // Single aggregation query — count rows per date for the requested window.
+    const placeholders = dateList.map(() => '?').join(', ');
+    const [rows] = await pool.query(
+      `SELECT \`date\`, COUNT(*) AS qty FROM production_entries WHERE \`date\` IN (${placeholders}) GROUP BY \`date\``,
+      dateList
+    );
+
+    // Map results into a lookup for O(1) access.
+    const qtyByDate = {};
+    rows.forEach(r => { qtyByDate[r.date] = Number(r.qty); });
+
+    // Build ordered response — fill missing dates with 0.
+    const trend = dateList.map(date => ({ date, qty: qtyByDate[date] || 0 }));
+
+    ok(res, { trend });
+  } catch (e) {
+    console.error('getProductionTrend error:', e);
+    err(res, 'Failed to load production trend', 500);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODEL-WISE PRODUCTION TREND
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/production/model-trend?days=7
+// Returns daily per-model production counts for the last N days.
+// Response: { dates: ['25 Nov',...], models: ['FG0495',...], data: { 'FG0495': [120, 0, ...] } }
+export const getModelTrend = async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+    const pool = getPool();
+
+    const fmtYYYYMMDD = (d) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
+    const today = new Date();
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      dateList.push(fmtYYYYMMDD(d));
+    }
+
+    const placeholders = dateList.map(() => '?').join(', ');
+    const [rows] = await pool.query(
+      `SELECT \`date\`, model, COUNT(*) AS qty FROM production_entries WHERE \`date\` IN (${placeholders}) GROUP BY \`date\`, model ORDER BY \`date\`, model`,
+      dateList
+    );
+
+    // Collect all unique models
+    const modelSet = new Set();
+    rows.forEach(r => modelSet.add(r.model));
+    const models = Array.from(modelSet).sort();
+
+    // Build lookup: { 'YYYY-MM-DD': { 'ModelA': 100, 'ModelB': 50 } }
+    const lookup = {};
+    rows.forEach(r => {
+      if (!lookup[r.date]) lookup[r.date] = {};
+      lookup[r.date][r.model] = Number(r.qty);
+    });
+
+    // Build per-model arrays aligned to dateList, fill gaps with 0
+    const data = {};
+    models.forEach(m => {
+      data[m] = dateList.map(date => (lookup[date] && lookup[date][m]) ? lookup[date][m] : 0);
+    });
+
+    // Readable date labels: '2026-11-25' → '25 Nov'
+    const labels = dateList.map(d => {
+      const [y, mo, dy] = d.split('-');
+      return new Date(Number(y), Number(mo) - 1, Number(dy))
+        .toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    });
+
+    ok(res, { labels, models, data });
+  } catch (e) {
+    console.error('getModelTrend error:', e);
+    err(res, 'Failed to load model trend', 500);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MONTHLY PRODUCTION TREND
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/production/monthly-trend?year=2026&month=all|1|2|...12
+// month=all   → one bar per month (Jan–Dec) showing total production for the year
+// month=N     → one bar per day for that month
+export const getMonthlyTrend = async (req, res) => {
+  try {
+    const pool = getPool();
+    const fmtIST = (d) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric' }).format(d);
+    const year = req.query.year || fmtIST(new Date());   // defaults to current IST year
+    const month = req.query.month || 'all';
+
+    if (month === 'all') {
+      // All months of the year — total per month
+      // dates are YYYY-MM-DD strings, so SUBSTRING(date,1,7) gives 'YYYY-MM'
+      const [rows] = await pool.query(
+        `SELECT SUBSTRING(\`date\`, 1, 7) AS ym, COUNT(*) AS qty
+           FROM production_entries
+          WHERE \`date\` LIKE ?
+          GROUP BY ym
+          ORDER BY ym`,
+        [`${year}-%`]
+      );
+
+      const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      // Fill all 12 months, qty 0 for months with no data
+      const lookup = {};
+      rows.forEach(r => { lookup[r.ym] = Number(r.qty); });
+      const labels = [], data = [];
+      for (let m = 1; m <= 12; m++) {
+        const key = `${year}-${String(m).padStart(2, '0')}`;
+        labels.push(MONTH_NAMES[m - 1]);
+        data.push(lookup[key] || 0);
+      }
+      ok(res, { labels, data, mode: 'all', year });
+    } else {
+      // Specific month — daily breakdown
+      const m = String(parseInt(month, 10)).padStart(2, '0');
+      const prefix = `${year}-${m}-`;
+      const [rows] = await pool.query(
+        `SELECT \`date\`, COUNT(*) AS qty FROM production_entries WHERE \`date\` LIKE ? GROUP BY \`date\` ORDER BY \`date\``,
+        [`${prefix}%`]
+      );
+
+      const lookup = {};
+      rows.forEach(r => { lookup[r.date] = Number(r.qty); });
+
+      // Build all calendar days for that month
+      const daysInMonth = new Date(Number(year), Number(m), 0).getDate();
+      const labels = [], data = [];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${m}-${String(d).padStart(2, '0')}`;
+        labels.push(String(d));
+        data.push(lookup[dateStr] || 0);
+      }
+      ok(res, { labels, data, mode: 'month', year, month: m });
+    }
+  } catch (e) {
+    console.error('getMonthlyTrend error:', e);
+    err(res, 'Failed to load monthly trend', 500);
+  }
+};
+
 // GET /api/production/pack/config
 export const getPackConfig = async (req, res) => {
   try {

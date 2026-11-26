@@ -10,7 +10,8 @@ import {
   getUsers, addUser, updateUser, deleteUser,
   verifyAdmin,
   getPackBoxes, savePackBox, getPackConfig, savePackConfig, deletePackConfig,
-  savePackScan, deletePackScan, getOpenBox, markBoxPrinted, manualPrintBox
+  savePackScan, deletePackScan, getOpenBox, markBoxPrinted, manualPrintBox,
+  getProductionTrend, getModelTrend, getMonthlyTrend
 } from '../controllers/production.controller.js';
 
 const router = express.Router();
@@ -54,6 +55,11 @@ router.delete('/users/:email', deleteUser);
 
 // Admin auth
 router.post('/admin/verify', verifyAdmin);
+
+// Production Trend
+router.get('/trend',         getProductionTrend);
+router.get('/model-trend',   getModelTrend);
+router.get('/monthly-trend', getMonthlyTrend);
 
 router.get('/pack/boxes',          getPackBoxes);
 router.post('/pack/boxes',         savePackBox);

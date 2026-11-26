@@ -378,6 +378,8 @@ const CSS = `
   .spin{width:18px;height:18px;border:2px solid #fca5a5;border-top-color:#C41E4E;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
   @keyframes spin{to{transform:rotate(360deg)}}
   .chart-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+  @media (max-width:1100px){.chart-grid{grid-template-columns:1fr 1fr}}
+  @media (max-width:680px){.chart-grid{grid-template-columns:1fr}}
   .ch-card{background:#fff;padding:12px;border-radius:9px;box-shadow:0 2px 6px rgba(0,0,0,.07);border:1px solid var(--g200)}
   .ch-card h4{font-size:11px;font-weight:700;color:var(--g700);margin-bottom:8px}
   .ch-wrap{position:relative;height:180px}
@@ -3139,10 +3141,416 @@ function ReportsTab({ liveS, liveManpower, liveSRange, appSettings, apiFetch, sh
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHARTS TAB
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Shared Chart.js Value-Labels Plugin (zero external dependencies) ──────────
+const makeValueLabelsPlugin = ({ id = 'valLabels', stacked = false, skipZero = true, compact = false } = {}) => ({
+  id,
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const fmt = (v) => {
+      if (compact && v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+      return typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(1) : v.toLocaleString('en-IN');
+    };
+    ctx.save();
+    ctx.font = '700 9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    if (stacked) {
+      const len = chart.data.labels?.length || 0;
+      for (let i = 0; i < len; i++) {
+        let sum = 0;
+        let topPt = null;
+        chart.data.datasets.forEach((ds, dIdx) => {
+          const meta = chart.getDatasetMeta(dIdx);
+          if (!meta || meta.hidden) return;
+          const v = Number(ds.data[i] || 0);
+          sum += v;
+          if (meta.data[i] && (topPt === null || meta.data[i].y < topPt.y)) {
+            topPt = meta.data[i];
+          }
+        });
+        if (!topPt || (skipZero && sum === 0)) continue;
+        const label = fmt(sum);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+        ctx.strokeText(label, topPt.x, topPt.y - 4);
+        ctx.fillStyle = '#1e293b';
+        ctx.fillText(label, topPt.x, topPt.y - 4);
+      }
+    } else {
+      const meta = chart.getDatasetMeta(0);
+      if (meta && !meta.hidden) {
+        meta.data.forEach((pt, idx) => {
+          const raw = chart.data.datasets[0].data[idx];
+          if (raw === null || raw === undefined) return;
+          const num = Number(raw);
+          if (skipZero && num === 0) return;
+          const label = fmt(num);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+          ctx.strokeText(label, pt.x, pt.y - 5);
+          ctx.fillStyle = '#1e293b';
+          ctx.fillText(label, pt.x, pt.y - 5);
+        });
+      }
+    }
+    ctx.restore();
+  },
+});
+
+// ── Model-wise Production Chart ───────────────────────────────────────────────
+const MODEL_COLORS = [
+  '#C41E4E','#667eea','#10b981','#f59e0b','#8b5cf6',
+  '#ec4899','#06b6d4','#84cc16','#f97316','#6366f1',
+];
+
+function ModelTrendChart({ refreshKey = 0 }) {
+  const [days, setDays]       = useState(7);
+  const [loading, setLoading] = useState(false);
+  const [chartErr, setChartErr] = useState('');
+  const canvasRef  = useRef();
+  const chartInst  = useRef(null);
+
+  const fetchAndDraw = useCallback(async (d) => {
+    setLoading(true);
+    setChartErr('');
+    try {
+      const data = await apiFetch('GET', `/model-trend?days=${d}`);
+      if (data.success === false) { setChartErr(data.message || 'Failed'); setLoading(false); return; }
+
+      const { labels, models, data: seriesData } = data;
+      if (!window.Chart || !canvasRef.current) { setLoading(false); return; }
+      const C = window.Chart;
+
+      const datasets = (models || []).map((m, i) => ({
+        label: m,
+        data: seriesData[m] || [],
+        backgroundColor: MODEL_COLORS[i % MODEL_COLORS.length] + 'CC',
+        borderColor:     MODEL_COLORS[i % MODEL_COLORS.length],
+        borderWidth: 1,
+        borderRadius: 3,
+      }));
+
+      const baseOpts = {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+        layout: { padding: { top: 14, right: 6 } },
+        plugins: { legend: { labels: { font: { size: 9 }, boxWidth: 10 }, position: 'bottom' } },
+        scales: {
+          x: { stacked: true, ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 }, grid: { color: 'rgba(0,0,0,0.04)' } },
+          y: { stacked: true, beginAtZero: true, grace: '14%', ticks: { font: { size: 9 } }, grid: { color: 'rgba(0,0,0,0.04)' } },
+        },
+      };
+
+      if (chartInst.current && chartInst.current.canvas !== canvasRef.current) {
+        chartInst.current.destroy(); chartInst.current = null;
+      }
+      if (!chartInst.current) {
+        chartInst.current = new C(canvasRef.current.getContext('2d'), {
+          type: 'bar',
+          plugins: [makeValueLabelsPlugin({ id: 'modelValLabels', stacked: true, skipZero: true, compact: true })],
+          data: { labels, datasets },
+          options: baseOpts,
+        });
+      } else {
+        chartInst.current.data.labels   = labels;
+        chartInst.current.data.datasets = datasets;
+        chartInst.current.update();
+      }
+    } catch { setChartErr('Network error'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchAndDraw(days); }, [days, refreshKey, fetchAndDraw]);
+  useEffect(() => () => { try { if (chartInst.current) chartInst.current.destroy(); } catch (e) {} }, []);
+
+  const dropStyle = { fontSize:'10px', fontWeight:600, color:'var(--g700)', border:'1px solid var(--g200)', borderRadius:5, padding:'2px 6px', background:'#f9fafb', cursor:'pointer', fontFamily:'Inter,sans-serif', outline:'none' };
+
+  return (
+    <div className="ch-card">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+        <h4 style={{ margin:0 }}>🏭 Model-wise Production</h4>
+        <select value={days} onChange={e => setDays(Number(e.target.value))} style={dropStyle}>
+          <option value={7}>Last 7 Days</option>
+          <option value={15}>Last 15 Days</option>
+          <option value={30}>Last 30 Days</option>
+        </select>
+      </div>
+      <div className="ch-wrap" style={{ position:'relative' }}>
+        {loading && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.75)', zIndex:2, borderRadius:6 }}><span className="spin" style={{ width:20, height:20 }}/></div>}
+        {!loading && chartErr && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#ef4444', fontSize:11, fontWeight:600 }}>⚠️ {chartErr}</div>}
+        <canvas ref={canvasRef}/>
+      </div>
+    </div>
+  );
+}
+
+// ── Monthly Trends Chart ──────────────────────────────────────────────────────
+const MONTH_OPTS = [
+  { value:'all', label:'All Months' },
+  { value:'1',  label:'January'  }, { value:'2',  label:'February' }, { value:'3',  label:'March'    },
+  { value:'4',  label:'April'    }, { value:'5',  label:'May'      }, { value:'6',  label:'June'     },
+  { value:'7',  label:'July'     }, { value:'8',  label:'August'   }, { value:'9',  label:'September'},
+  { value:'10', label:'October'  }, { value:'11', label:'November' }, { value:'12', label:'December' },
+];
+
+const MONTH_COLORS = [
+  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6',
+  '#ef4444', '#3b82f6', '#14b8a6', '#f97316', '#84cc16', '#C41E4E',
+];
+
+function MonthlyTrendChart({ refreshKey = 0 }) {
+  const curYear = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric' }).format(new Date());
+  const [month, setMonth]     = useState('all'); // default to All Months
+  const [loading, setLoading] = useState(false);
+  const [chartErr, setChartErr] = useState('');
+  const canvasRef  = useRef();
+  const chartInst  = useRef(null);
+
+  const fetchAndDraw = useCallback(async (m) => {
+    setLoading(true);
+    setChartErr('');
+    try {
+      const data = await apiFetch('GET', `/monthly-trend?year=${curYear}&month=${m}`);
+      if (data.success === false) { setChartErr(data.message || 'Failed'); setLoading(false); return; }
+
+      const { labels, data: qty, mode } = data;
+      if (!window.Chart || !canvasRef.current) { setLoading(false); return; }
+      const C = window.Chart;
+
+      const isAllMode = mode === 'all';
+      const lineColor = '#8b5cf6';
+
+      const cfg = {
+        type: isAllMode ? 'bar' : 'line',
+        plugins: [makeValueLabelsPlugin({ id: 'monthlyValLabels', skipZero: true, compact: isAllMode })],
+        data: {
+          labels,
+          datasets: [{
+            label: isAllMode ? `Monthly Production (${curYear})` : 'Daily Production',
+            data: qty,
+            backgroundColor: isAllMode ? MONTH_COLORS.map(c => c + 'CC') : lineColor + '22',
+            borderColor:     isAllMode ? MONTH_COLORS : lineColor,
+            hoverBackgroundColor: isAllMode ? MONTH_COLORS : lineColor,
+            borderWidth: 2,
+            borderRadius: isAllMode ? 5 : 0,
+            borderSkipped: false,
+            fill: !isAllMode,
+            tension: 0.4,
+            pointRadius: isAllMode ? 0 : 3.5,
+            pointHoverRadius: 5,
+            pointBackgroundColor: lineColor,
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+          }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+          layout: { padding: { top: 16, right: 6 } },
+          plugins: {
+            legend: { display: !isAllMode, labels: { font: { size: 10 }, boxWidth: 10 } },
+            tooltip: { callbacks: { label: item => `  Production: ${Number(item.parsed.y).toLocaleString('en-IN')} units` } },
+          },
+          scales: {
+            x: { ticks: { font: { size: 9 }, maxRotation: 0 }, grid: { color: 'rgba(0,0,0,0.04)' } },
+            y: { beginAtZero: true, grace: '14%', ticks: { font: { size: 9 } }, grid: { color: 'rgba(0,0,0,0.04)' } },
+          },
+        },
+      };
+
+      if (chartInst.current && (chartInst.current.canvas !== canvasRef.current || chartInst.current.config.type !== cfg.type)) {
+        chartInst.current.destroy(); chartInst.current = null;
+      }
+      if (!chartInst.current) {
+        chartInst.current = new C(canvasRef.current.getContext('2d'), cfg);
+      } else {
+        chartInst.current.data    = cfg.data;
+        chartInst.current.options = cfg.options;
+        chartInst.current.update();
+      }
+    } catch { setChartErr('Network error'); }
+    finally { setLoading(false); }
+  }, [curYear]);
+
+  useEffect(() => { fetchAndDraw(month); }, [month, refreshKey, fetchAndDraw]);
+  useEffect(() => () => { try { if (chartInst.current) chartInst.current.destroy(); } catch (e) {} }, []);
+
+  const dropStyle = { fontSize:'10px', fontWeight:600, color:'var(--g700)', border:'1px solid var(--g200)', borderRadius:5, padding:'2px 6px', background:'#f9fafb', cursor:'pointer', fontFamily:'Inter,sans-serif', outline:'none' };
+
+  return (
+    <div className="ch-card">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+        <h4 style={{ margin:0 }}>📅 Monthly Trends ({curYear})</h4>
+        <select value={month} onChange={e => setMonth(e.target.value)} style={dropStyle}>
+          {MONTH_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+      <div className="ch-wrap" style={{ position:'relative' }}>
+        {loading && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.75)', zIndex:2, borderRadius:6 }}><span className="spin" style={{ width:20, height:20 }}/></div>}
+        {!loading && chartErr && <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#ef4444', fontSize:11, fontWeight:600 }}>⚠️ {chartErr}</div>}
+        <canvas ref={canvasRef}/>
+      </div>
+    </div>
+  );
+}
+
+// ── Production Trend sub-component ──────────────────────────────────────────
+function ProductionTrendChart({ refreshKey = 0 }) {
+  const [days, setDays]       = useState(7);
+  const [trend, setTrend]     = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [trendErr, setTrendErr] = useState("");
+  const trendRef  = useRef();
+  const trendChart = useRef(null);
+
+  const fetchTrend = useCallback(async (d) => {
+    setLoading(true);
+    setTrendErr("");
+    try {
+      const data = await apiFetch("GET", `/trend?days=${d}`);
+      if (data.success !== false && Array.isArray(data.trend)) {
+        setTrend(data.trend);
+      } else {
+        setTrendErr(data.message || "Failed to load trend data");
+        setTrend([]);
+      }
+    } catch {
+      setTrendErr("Network error loading trend");
+      setTrend([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchTrend(days); }, [days, refreshKey, fetchTrend]);
+
+  useEffect(() => {
+    if (!window.Chart || !trendRef.current) return;
+    const C = window.Chart;
+    const labels = trend.map(r => {
+      // Convert YYYY-MM-DD → "25 Nov" for readable x-axis
+      try {
+        const [y, m, d] = r.date.split('-');
+        return new Date(Number(y), Number(m) - 1, Number(d))
+          .toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+      } catch { return r.date; }
+    });
+    const data   = trend.map(r => r.qty);
+    const base   = { responsive:true, maintainAspectRatio:false, animation:{ duration:400 }, plugins:{ legend:{ labels:{ font:{ size:10 }, boxWidth:10 } } } };
+
+    if (trendChart.current && trendChart.current.canvas !== trendRef.current) {
+      trendChart.current.destroy(); trendChart.current = null;
+    }
+
+    if (!trendChart.current) {
+      trendChart.current = new C(trendRef.current.getContext("2d"), {
+        type: "line",
+        plugins: [makeValueLabelsPlugin({ id: "trendPointLabels", skipZero: false, compact: false })],
+        data: {
+          labels,
+          datasets: [{
+            label: "Daily Production",
+            data,
+            borderColor: "#667eea",
+            backgroundColor: "rgba(102,126,234,0.12)",
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointBackgroundColor: "#667eea",
+            pointBorderColor: "#fff",
+            pointBorderWidth: 2,
+          }]
+        },
+        options: {
+          ...base,
+          layout: { padding: { top: 14, right: 8 } },
+          scales: {
+            x: {
+              ticks: { font:{ size:9 }, maxRotation:45, minRotation:30 },
+              grid:  { color:"rgba(0,0,0,0.05)" }
+            },
+            y: {
+              beginAtZero: true,
+              grace: "12%",
+              ticks: { font:{ size:9 } },
+              grid:  { color:"rgba(0,0,0,0.05)" }
+            }
+          },
+          plugins: {
+            ...base.plugins,
+            tooltip: {
+              callbacks: {
+                title: (items) => `Date: ${items[0].label}`,
+                label: (item)  => `  Production: ${item.parsed.y} units`
+              }
+            }
+          }
+        }
+      });
+    } else {
+      trendChart.current.data.labels            = labels;
+      trendChart.current.data.datasets[0].data  = data;
+      trendChart.current.update();
+    }
+  }, [trend]);
+
+  useEffect(() => {
+    return () => { try { if (trendChart.current) trendChart.current.destroy(); } catch (e) {} };
+  }, []);
+
+  const handleDaysChange = (e) => {
+    const v = Number(e.target.value);
+    setDays(v);
+  };
+
+  return (
+    <div className="ch-card">
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+        <h4 style={{ margin:0 }}>📉 Production Trend</h4>
+        <select
+          value={days}
+          onChange={handleDaysChange}
+          style={{
+            fontSize:"10px", fontWeight:600, color:"var(--g700)",
+            border:"1px solid var(--g200)", borderRadius:5, padding:"2px 6px",
+            background:"#f9fafb", cursor:"pointer", fontFamily:"Inter,sans-serif",
+            outline:"none"
+          }}
+        >
+          <option value={7}>Last 7 Days</option>
+          <option value={15}>Last 15 Days</option>
+          <option value={30}>Last 30 Days</option>
+        </select>
+      </div>
+      <div className="ch-wrap" style={{ position:"relative" }}>
+        {loading && (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(255,255,255,0.75)", zIndex:2, borderRadius:6 }}>
+            <span className="spin" style={{ width:20, height:20 }} />
+          </div>
+        )}
+        {!loading && trendErr && (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", color:"#ef4444", fontSize:11, fontWeight:600, textAlign:"center", padding:8 }}>
+            ⚠️ {trendErr}
+          </div>
+        )}
+        {!loading && !trendErr && trend.length === 0 && (
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--g500)", fontSize:11, fontWeight:600 }}>
+            No production data for this period
+          </div>
+        )}
+        <canvas ref={trendRef} />
+      </div>
+    </div>
+  );
+}
+
 function ChartsTab({ S, manpower }) {
   const refs   = { prod:useRef(), upph:useRef(), uph:useRef(), ach:useRef(), idle:useRef(), rld:useRef() };
   const charts = useRef({});
   const lbls   = SLOT_LABELS;
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const build = useCallback(() => {
     if (!window.Chart) return;
@@ -3172,12 +3580,12 @@ function ChartsTab({ S, manpower }) {
       charts.current[key].update("none");
     };
 
-    upsert("prod", refs.prod, { type:"bar", data:{ labels:lbls, datasets:[{ label:"Production", data:prodData, backgroundColor:"rgba(196,30,78,.7)", borderColor:"#C41E4E", borderWidth:1, borderRadius:3 },{ label:"Target", data:targetData, type:"line", borderColor:"#1a1a2e", borderWidth:2, pointRadius:2, fill:false, tension:.3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; chart.data.datasets[1].data = targetData; });
+    upsert("prod", refs.prod, { type:"bar", plugins:[makeValueLabelsPlugin({ id:"prodValLabels", skipZero:true })], data:{ labels:lbls, datasets:[{ label:"Production", data:prodData, backgroundColor:"rgba(196,30,78,.7)", borderColor:"#C41E4E", borderWidth:1, borderRadius:3 },{ label:"Target", data:targetData, type:"line", borderColor:"#1a1a2e", borderWidth:2, pointRadius:2, fill:false, tension:.3 }]}, options:{...base,layout:{padding:{top:12}},scales:{y:{beginAtZero:true,grace:"12%"}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; chart.data.datasets[1].data = targetData; });
     upsert("ach", refs.ach, { type:"doughnut", data:{ labels:["Achieved ("+pct+"%)","Gap ("+(100-pct)+"%)"], datasets:[{ data:[pct,Math.max(0,100-pct)], backgroundColor:["#10b981","#fee2e2"], borderWidth:2 }]}, options:{...base,cutout:"65%"}}, chart => { chart.data.labels = ["Achieved ("+pct+"%)","Gap ("+(100-pct)+"%)"]; chart.data.datasets[0].data = [pct, Math.max(0,100-pct)]; });
-    upsert("idle", refs.idle, { type:"bar", data:{ labels:iL.length?iL:["No Data"], datasets:[{ label:"Idle (min)", data:iV.length?iV:[0], backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)), borderRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}},plugins:{...base.plugins,legend:{display:false}}}}, chart => { chart.data.labels = iL.length ? iL : ["No Data"]; chart.data.datasets[0].data = iV.length ? iV : [0]; chart.data.datasets[0].backgroundColor = ["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)); });
+    upsert("idle", refs.idle, { type:"bar", plugins:[makeValueLabelsPlugin({ id:"idleValLabels", skipZero:true })], data:{ labels:iL.length?iL:["No Data"], datasets:[{ label:"Idle (min)", data:iV.length?iV:[0], backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)), borderRadius:3 }]}, options:{...base,layout:{padding:{top:14}},scales:{y:{beginAtZero:true,grace:"14%"}},plugins:{...base.plugins,legend:{display:false}}}}, chart => { chart.data.labels = iL.length ? iL : ["No Data"]; chart.data.datasets[0].data = iV.length ? iV : [0]; chart.data.datasets[0].backgroundColor = ["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6","#ec4899"].slice(0,Math.max(1,iL.length)); });
     upsert("rld", refs.rld, { type:"pie", data:{ labels:rL.length?rL:["No Data"], datasets:[{ data:rV.length?rV:[1], backgroundColor:["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6"].slice(0,Math.max(1,rL.length)), borderWidth:2 }]}, options:{...base}}, chart => { chart.data.labels = rL.length ? rL : ["No Data"]; chart.data.datasets[0].data = rV.length ? rV : [1]; chart.data.datasets[0].backgroundColor = ["#ef4444","#f59e0b","#10b981","#667eea","#8b5cf6"].slice(0,Math.max(1,rL.length)); });
-    upsert("upph", refs.upph, { type:"line", data:{ labels:lbls, datasets:[{ label:"UPPH", data:upphData, borderColor:"#10b981", backgroundColor:"rgba(16,185,129,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = upphData; });
-    upsert("uph", refs.uph, { type:"line", data:{ labels:lbls, datasets:[{ label:"UPH", data:prodData, borderColor:"#C41E4E", backgroundColor:"rgba(196,30,78,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,scales:{y:{beginAtZero:true}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; });
+    upsert("upph", refs.upph, { type:"line", plugins:[makeValueLabelsPlugin({ id:"upphValLabels", skipZero:true })], data:{ labels:lbls, datasets:[{ label:"UPPH", data:upphData, borderColor:"#10b981", backgroundColor:"rgba(16,185,129,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,layout:{padding:{top:12}},scales:{y:{beginAtZero:true,grace:"12%"}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = upphData; });
+    upsert("uph", refs.uph, { type:"line", plugins:[makeValueLabelsPlugin({ id:"uphValLabels", skipZero:true })], data:{ labels:lbls, datasets:[{ label:"UPH", data:prodData, borderColor:"#C41E4E", backgroundColor:"rgba(196,30,78,.1)", borderWidth:2, fill:true, tension:.4, pointRadius:3 }]}, options:{...base,layout:{padding:{top:12}},scales:{y:{beginAtZero:true,grace:"12%"}}}}, chart => { chart.data.labels = lbls; chart.data.datasets[0].data = prodData; });
   }, [S, manpower, lbls]);
 
   useEffect(() => {
@@ -3190,17 +3598,25 @@ function ChartsTab({ S, manpower }) {
 
   return (
     <div className="tab-pane">
+      {/* Row 1: Hourly Production vs Target | UPPH by Hour | Production Trend (NEW) */}
       <div className="chart-grid">
         <div className="ch-card"><h4>📊 Hourly Production vs Target</h4><div className="ch-wrap"><canvas ref={refs.prod}/></div></div>
         <div className="ch-card"><h4>📈 UPPH by Hour</h4><div className="ch-wrap"><canvas ref={refs.upph}/></div></div>
-        <div className="ch-card"><h4>📈 UPH by Hour</h4><div className="ch-wrap"><canvas ref={refs.uph}/></div></div>
+        <ProductionTrendChart refreshKey={refreshTick} />
       </div>
+      {/* Row 2: UPH by Hour | Model-wise Production | Monthly Trends */}
+      <div className="chart-grid">
+        <div className="ch-card"><h4>📈 UPH by Hour</h4><div className="ch-wrap"><canvas ref={refs.uph}/></div></div>
+        <ModelTrendChart refreshKey={refreshTick} />
+        <MonthlyTrendChart refreshKey={refreshTick} />
+      </div>
+      {/* Row 3: Plan vs Achievement | Idle by Department | Reload Types */}
       <div className="chart-grid">
         <div className="ch-card"><h4>🎯 Plan vs Achievement</h4><div className="ch-wrap"><canvas ref={refs.ach}/></div></div>
         <div className="ch-card"><h4>⏱ Idle by Department</h4><div className="ch-wrap"><canvas ref={refs.idle}/></div></div>
         <div className="ch-card"><h4>🔄 Reload Types</h4><div className="ch-wrap"><canvas ref={refs.rld}/></div></div>
       </div>
-      <div style={{textAlign:"right"}}><button className="btn btn-navy" onClick={build}>🔄 Refresh Charts</button></div>
+      <div style={{textAlign:"right"}}><button className="btn btn-navy" onClick={() => { build(); setRefreshTick(t => t + 1); }}>🔄 Refresh Charts</button></div>
     </div>
   );
 }
